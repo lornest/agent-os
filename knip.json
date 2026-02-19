@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "ignoreDependencies": ["prettier"]
+    },
+    "packages/core": {},
+    "packages/gateway": {},
+    "packages/agent-runtime": {},
+    "packages/memory": {
+      "ignoreDependencies": ["@agentic-os/core"]
+    },
+    "packages/tools": {
+      "ignoreDependencies": ["@agentic-os/core"]
+    },
+    "packages/plugins": {
+      "ignoreDependencies": ["@agentic-os/core"]
+    },
+    "packages/orchestrator": {
+      "ignoreDependencies": ["@agentic-os/core"]
+    }
+  }
+}
