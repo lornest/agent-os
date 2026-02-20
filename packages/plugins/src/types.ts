@@ -48,9 +48,7 @@ export interface PluginLoaderOptions {
 
 /** Options for skill directory discovery. */
 export interface SkillDiscoveryOptions {
-  workspaceDir?: string;
-  userDir?: string;
-  bundledDir?: string;
+  directories: string[];
   enabled: string[];
   disabled: string[];
   logger: Logger;

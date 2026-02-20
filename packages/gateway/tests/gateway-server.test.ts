@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GatewayServer } from '../src/gateway-server.js';
 import type { GatewayConfig } from '@agentic-os/core';
+import type { Subscription } from '../src/types.js';
 
 // Mock all dependencies using class-based mocks
 vi.mock('../src/nats-client.js', () => ({
@@ -43,6 +44,19 @@ const testConfig: GatewayConfig = {
   maxConcurrentAgents: 10,
 };
 
+function makeMockSubscription(overrides: Partial<Subscription> = {}): Subscription {
+  return {
+    subject: 'agent.test.inbox',
+    queueGroup: undefined,
+    streamName: 'AGENT_TASKS',
+    consumerName: 'consumer-test',
+    unsubscribe: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 describe('GatewayServer', () => {
   let server: GatewayServer;
 
@@ -77,5 +91,12 @@ describe('GatewayServer', () => {
   it('exposes NATS and Redis clients', () => {
     expect(server.getNatsClient()).toBeDefined();
     expect(server.getRedisClient()).toBeDefined();
+  });
+
+  it('registers and unregisters subscriptions', () => {
+    const sub = makeMockSubscription();
+    server.registerSubscription('agent://test', sub);
+    // No error means success; unregister should also work
+    server.unregisterSubscription('agent://test');
   });
 });

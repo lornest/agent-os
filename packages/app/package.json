@@ -1,0 +1,44 @@
+{
+  "name": "@agentic-os/app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "lint": "echo 'lint not yet configured'",
+    "clean": "rm -rf dist .turbo",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@agentic-os/core": "workspace:*",
+    "@agentic-os/gateway": "workspace:*",
+    "@agentic-os/channels": "workspace:*",
+    "@agentic-os/agent-runtime": "workspace:*",
+    "@agentic-os/memory": "workspace:*",
+    "@agentic-os/tools": "workspace:*",
+    "@agentic-os/plugins": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentic-os/typescript-config": "workspace:*",
+    "@types/node": "^22.19.11",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "ws": "^8.19.0",
+    "@types/ws": "^8.18.1"
+  }
+}

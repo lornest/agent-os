@@ -12,6 +12,10 @@
     "packages/plugins": {},
     "packages/orchestrator": {
       "ignoreDependencies": ["@agentic-os/core"]
+    },
+    "packages/channels": {},
+    "packages/app": {
+      "entry": ["tests/**/*.test.ts"]
     }
   }
 }

@@ -25,6 +25,19 @@ function createMockProvider(
   };
 }
 
+function createFailingProvider(id: string, error: Error): LLMProvider {
+  return {
+    id,
+    supportsPromptCaching: false,
+    async *streamCompletion(): AsyncIterable<StreamChunk> {
+      throw error;
+    },
+    async countTokens(): Promise<number> {
+      return 0;
+    },
+  };
+}
+
 describe('LLMService', () => {
   it('binds session to first available provider', () => {
     const provider = createMockProvider('p1', []);
@@ -184,5 +197,111 @@ describe('LLMService', () => {
 
     const count = await service.countTokens([{ role: 'user', content: 'Hello' }]);
     expect(count).toBe(42);
+  });
+
+  describe('fallback rotation', () => {
+    it('does not attempt fallback when primary succeeds', async () => {
+      const calls: string[] = [];
+      const p1: LLMProvider = {
+        id: 'p1',
+        supportsPromptCaching: false,
+        async *streamCompletion() {
+          calls.push('p1');
+          yield { type: 'text_delta' as const, text: 'ok' };
+          yield { type: 'done' as const, finishReason: 'stop' };
+        },
+        async countTokens() { return 10; },
+      };
+      const p2: LLMProvider = {
+        id: 'p2',
+        supportsPromptCaching: false,
+        async *streamCompletion() {
+          calls.push('p2');
+          yield { type: 'done' as const, finishReason: 'stop' };
+        },
+        async countTokens() { return 10; },
+      };
+
+      const service = new LLMService({
+        providers: [p1, p2],
+        models: { providers: [], fallbacks: ['p2'] },
+        auth: { profiles: [] },
+      });
+      service.bindSession('s1');
+
+      const response = await service.streamCompletion([], []);
+      expect(response.text).toBe('ok');
+      expect(calls).toEqual(['p1']);
+    });
+
+    it('falls back when primary throws', async () => {
+      const primaryError = new Error('primary down');
+      const p1 = createFailingProvider('p1', primaryError);
+      const p2 = createMockProvider('p2', [
+        { type: 'text_delta', text: 'fallback' },
+        { type: 'done', finishReason: 'stop' },
+      ]);
+
+      const service = new LLMService({
+        providers: [p1, p2],
+        models: { providers: [], fallbacks: ['p2'] },
+        auth: { profiles: [] },
+      });
+      service.bindSession('s1');
+
+      const response = await service.streamCompletion([], []);
+      expect(response.text).toBe('fallback');
+    });
+
+    it('re-throws last error when all providers fail', async () => {
+      const p1 = createFailingProvider('p1', new Error('p1 down'));
+      const p2 = createFailingProvider('p2', new Error('p2 down'));
+      const p3 = createFailingProvider('p3', new Error('p3 down'));
+
+      const service = new LLMService({
+        providers: [p1, p2, p3],
+        models: { providers: [], fallbacks: ['p2', 'p3'] },
+        auth: { profiles: [] },
+      });
+      service.bindSession('s1');
+
+      await expect(service.streamCompletion([], [])).rejects.toThrow('p3 down');
+    });
+
+    it('respects fallback order', async () => {
+      const calls: string[] = [];
+      const p1 = createFailingProvider('p1', new Error('p1 down'));
+      const p2: LLMProvider = {
+        id: 'p2',
+        supportsPromptCaching: false,
+        async *streamCompletion() {
+          calls.push('p2');
+          yield { type: 'text_delta' as const, text: 'from-p2' };
+          yield { type: 'done' as const, finishReason: 'stop' };
+        },
+        async countTokens() { return 10; },
+      };
+      const p3: LLMProvider = {
+        id: 'p3',
+        supportsPromptCaching: false,
+        async *streamCompletion() {
+          calls.push('p3');
+          yield { type: 'text_delta' as const, text: 'from-p3' };
+          yield { type: 'done' as const, finishReason: 'stop' };
+        },
+        async countTokens() { return 10; },
+      };
+
+      const service = new LLMService({
+        providers: [p1, p2, p3],
+        models: { providers: [], fallbacks: ['p2', 'p3'] },
+        auth: { profiles: [] },
+      });
+      service.bindSession('s1');
+
+      const response = await service.streamCompletion([], []);
+      expect(response.text).toBe('from-p2');
+      expect(calls).toEqual(['p2']);
+    });
   });
 });

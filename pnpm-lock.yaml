@@ -55,6 +55,83 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/app:
+    dependencies:
+      '@agentic-os/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@agentic-os/channels':
+        specifier: workspace:*
+        version: link:../channels
+      '@agentic-os/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agentic-os/gateway':
+        specifier: workspace:*
+        version: link:../gateway
+      '@agentic-os/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@agentic-os/plugins':
+        specifier: workspace:*
+        version: link:../plugins
+      '@agentic-os/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@agentic-os/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^22.19.11
+        version: 22.19.11
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
+
+  packages/channels:
+    dependencies:
+      '@agentic-os/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agentic-os/gateway':
+        specifier: workspace:*
+        version: link:../gateway
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
+    devDependencies:
+      '@agentic-os/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: ^22.19.11
+        version: 22.19.11
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
+
   packages/core:
     dependencies:
       json5:

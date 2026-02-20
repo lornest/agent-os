@@ -28,7 +28,7 @@ const STREAMS: StreamDefinition[] = [
   },
   {
     name: 'AGENT_EVENTS',
-    subjects: ['agent.events.>'],
+    subjects: ['events.agent.>'],
     retention: 'interest',
     maxDeliver: 3,
     ackWaitNs: 30_000_000_000,
@@ -77,25 +77,31 @@ export class NatsClient {
   private async ensureStreams(): Promise<void> {
     if (!this.jsm) throw new Error('NATS not connected');
     for (const def of STREAMS) {
-      try {
+      const streamExists = await this.streamExists(def.name);
+      if (streamExists) {
+        // Stream already exists — update its config
+        await this.jsm.streams.update(def.name, {
+          subjects: def.subjects,
+          max_age: def.maxAge,
+        });
+      } else {
+        // Create new stream
         await this.jsm.streams.add({
           name: def.name,
           subjects: def.subjects,
           retention: retentionToNats(def.retention),
           max_age: def.maxAge,
         });
-      } catch (err: unknown) {
-        // Stream may already exist — update instead
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('already in use')) {
-          await this.jsm.streams.update(def.name, {
-            subjects: def.subjects,
-            max_age: def.maxAge,
-          });
-        } else {
-          throw err;
-        }
       }
+    }
+  }
+
+  private async streamExists(name: string): Promise<boolean> {
+    try {
+      await this.jsm!.streams.info(name);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -161,8 +167,8 @@ export class NatsClient {
     };
 
     await this.jsm.consumers.add(streamName, consumerOpts);
-    const consumer = await this.js.consumers.get(streamName, consumerName);
-    const messages = await consumer.consume();
+    let consumer = await this.js.consumers.get(streamName, consumerName);
+    let messages = await consumer.consume();
 
     // Process messages in the background
     const processMessages = async () => {
@@ -178,35 +184,24 @@ export class NatsClient {
     };
     processMessages();
 
+    const js = this.js;
     return {
       subject,
       queueGroup,
+      streamName,
+      consumerName,
       unsubscribe: () => {
         messages.stop();
       },
+      pause: () => {
+        messages.stop();
+      },
+      resume: async () => {
+        consumer = await js.consumers.get(streamName, consumerName);
+        messages = await consumer.consume();
+        processMessages();
+      },
     };
-  }
-
-  async pauseConsumer(
-    stream: string,
-    consumer: string,
-  ): Promise<void> {
-    if (!this.jsm) throw new Error('NATS not connected');
-    // Pause by setting inactive_threshold very low — consumer will be paused
-    await this.jsm.consumers.update(stream, consumer, {
-      // Set metadata flag so we know it's paused
-      metadata: { paused: 'true' },
-    });
-  }
-
-  async resumeConsumer(
-    stream: string,
-    consumer: string,
-  ): Promise<void> {
-    if (!this.jsm) throw new Error('NATS not connected');
-    await this.jsm.consumers.update(stream, consumer, {
-      metadata: { paused: 'false' },
-    });
   }
 
   private subscribeDlqAdvisory(): void {

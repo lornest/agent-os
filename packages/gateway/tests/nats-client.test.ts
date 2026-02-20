@@ -17,11 +17,12 @@ function makeMsg(overrides: Partial<AgentMessage> = {}): AgentMessage {
 }
 
 // Build mock infrastructure
+const mockStop = vi.fn();
 const mockConsume = vi.fn().mockResolvedValue({
   [Symbol.asyncIterator]: () => ({
     next: vi.fn().mockResolvedValue({ done: true, value: undefined }),
   }),
-  stop: vi.fn(),
+  stop: mockStop,
 });
 
 const mockConsumersGet = vi.fn().mockResolvedValue({
@@ -29,10 +30,10 @@ const mockConsumersGet = vi.fn().mockResolvedValue({
 });
 
 const mockConsumersAdd = vi.fn().mockResolvedValue({});
-const mockConsumersUpdate = vi.fn().mockResolvedValue({});
 
 const mockStreamsAdd = vi.fn().mockResolvedValue({});
 const mockStreamsUpdate = vi.fn().mockResolvedValue({});
+const mockStreamsInfo = vi.fn().mockRejectedValue(new Error('stream not found'));
 const mockStreamsGetMessage = vi.fn().mockResolvedValue(null);
 
 const mockPublish = vi.fn().mockResolvedValue({ seq: 1 });
@@ -64,11 +65,11 @@ vi.mock('nats', () => ({
           streams: {
             add: mockStreamsAdd,
             update: mockStreamsUpdate,
+            info: mockStreamsInfo,
             getMessage: mockStreamsGetMessage,
           },
           consumers: {
             add: mockConsumersAdd,
-            update: mockConsumersUpdate,
           },
         }),
       request: mockRequest,
@@ -110,12 +111,15 @@ describe('NatsClient', () => {
   });
 
   it('handles existing streams by updating', async () => {
-    mockStreamsAdd.mockRejectedValueOnce(new Error('already in use'));
-    mockStreamsAdd.mockResolvedValueOnce({});
-    mockStreamsAdd.mockResolvedValueOnce({});
+    // First stream exists (info succeeds), rest don't (info throws)
+    mockStreamsInfo.mockResolvedValueOnce({});
+    mockStreamsInfo.mockRejectedValueOnce(new Error('stream not found'));
+    mockStreamsInfo.mockRejectedValueOnce(new Error('stream not found'));
 
     await client.connect('nats://localhost:4222');
+    // 1 existing stream updated, 2 new streams created
     expect(mockStreamsUpdate).toHaveBeenCalledTimes(1);
+    expect(mockStreamsAdd).toHaveBeenCalledTimes(2);
   });
 
   it('publishes a message with idempotency header', async () => {
@@ -155,31 +159,31 @@ describe('NatsClient', () => {
     expect(responses).toHaveLength(2);
   });
 
-  it('subscribes to a subject', async () => {
+  it('subscribes to a subject and returns stream/consumer names', async () => {
     await client.connect('nats://localhost:4222');
 
     const handler = vi.fn();
     const sub = await client.subscribe('agent.test.inbox', handler);
     expect(sub.subject).toBe('agent.test.inbox');
+    expect(sub.streamName).toBe('AGENT_TASKS');
+    expect(sub.consumerName).toMatch(/^consumer-/);
     expect(mockConsumersAdd).toHaveBeenCalled();
   });
 
-  it('pauses and resumes a consumer', async () => {
+  it('subscription pause stops the consumer and resume re-acquires it', async () => {
     await client.connect('nats://localhost:4222');
 
-    await client.pauseConsumer('AGENT_TASKS', 'my-consumer');
-    expect(mockConsumersUpdate).toHaveBeenCalledWith(
-      'AGENT_TASKS',
-      'my-consumer',
-      expect.objectContaining({ metadata: { paused: 'true' } }),
-    );
+    const handler = vi.fn();
+    const sub = await client.subscribe('agent.test.inbox', handler);
 
-    await client.resumeConsumer('AGENT_TASKS', 'my-consumer');
-    expect(mockConsumersUpdate).toHaveBeenCalledWith(
-      'AGENT_TASKS',
-      'my-consumer',
-      expect.objectContaining({ metadata: { paused: 'false' } }),
-    );
+    sub.pause();
+    expect(mockStop).toHaveBeenCalled();
+
+    mockStop.mockClear();
+    await sub.resume();
+    // Should re-acquire consumer via consumers.get
+    expect(mockConsumersGet).toHaveBeenCalled();
+    expect(mockConsume).toHaveBeenCalled();
   });
 
   it('closes cleanly', async () => {

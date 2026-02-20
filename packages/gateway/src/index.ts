@@ -29,7 +29,7 @@ export type { ParsedTarget } from './router.js';
 
 // WebSocket server
 export { GatewayWebSocketServer } from './websocket-server.js';
-export type { WebSocketServerOptions } from './websocket-server.js';
+export type { WebSocketServerOptions, WsMessageHandler } from './websocket-server.js';
 
 // Health server
 export { HealthServer } from './health.js';

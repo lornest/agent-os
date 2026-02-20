@@ -53,10 +53,10 @@ describe('MessageRouter', () => {
     );
   });
 
-  it('routes topic:// to agent.events.{name}', async () => {
+  it('routes topic:// to events.agent.{name}', async () => {
     await router.route(makeMsg('topic://user.created'));
     expect(mockNats.publish).toHaveBeenCalledWith(
-      'agent.events.user.created',
+      'events.agent.user.created',
       expect.objectContaining({ id: 'msg-1' }),
     );
   });

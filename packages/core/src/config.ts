@@ -1,3 +1,4 @@
+import type { ChannelsConfig } from './channels.js';
 import type { SkillsConfig } from './skills.js';
 
 /** Top-level configuration schema for the Agentic OS. */
@@ -13,6 +14,7 @@ export interface AgenticOsConfig {
   plugins: PluginsConfig;
   memory?: MemoryConfig;
   skills?: SkillsConfig;
+  channels?: ChannelsConfig;
 }
 
 /** Configuration for the memory subsystem. */

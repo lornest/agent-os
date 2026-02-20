@@ -25,7 +25,7 @@ export class MessageRouter {
         await this.nats.publish(`agent.${path}.inbox`, msg);
         break;
       case 'topic':
-        await this.nats.publish(`agent.events.${path}`, msg);
+        await this.nats.publish(`events.agent.${path}`, msg);
         break;
       default:
         throw new Error(`Unknown target scheme: ${scheme}`);

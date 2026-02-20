@@ -1,6 +1,7 @@
 import type {
   AgentControlBlock,
   AgentEvent,
+  AgentMessage,
   AgentSnapshot,
   AgentStatus,
   Disposable,
@@ -258,11 +259,47 @@ export class AgentManager {
     this.promptMode = mode;
   }
 
-  async subscribeToInbox(nats: NatsClient): Promise<void> {
+  /**
+   * Subscribe to the NATS inbox and dispatch incoming messages.
+   * The onResponse callback is invoked with each AgentEvent plus the
+   * original message, so the app layer can route responses back.
+   */
+  async subscribeToInbox(
+    nats: NatsClient,
+    onResponse?: (event: AgentEvent, originalMsg: AgentMessage) => void,
+  ): Promise<Subscription> {
     const subject = `agent.${this.agentId}.inbox`;
-    this.inboxSubscription = await nats.subscribe(subject, async (_msg) => {
-      // Message handling delegated to dispatch
+    const sub = await nats.subscribe(subject, async (msg) => {
+      // Extract user text from AgentMessage.data
+      const data = msg.data as Record<string, unknown> | string | undefined;
+      let userMessage: string;
+      if (typeof data === 'string') {
+        userMessage = data;
+      } else if (data && typeof data === 'object' && typeof data['text'] === 'string') {
+        userMessage = data['text'];
+      } else {
+        return; // Can't extract a user message, skip
+      }
+
+      const sessionId = (
+        typeof data === 'object' && data !== null
+          ? (data['sessionId'] as string | undefined)
+          : undefined
+      ) ?? undefined;
+
+      try {
+        for await (const event of this.dispatch(userMessage, sessionId)) {
+          onResponse?.(event, msg);
+        }
+      } catch (err) {
+        onResponse?.(
+          { type: 'error', error: err instanceof Error ? err.message : String(err) },
+          msg,
+        );
+      }
     });
+    this.inboxSubscription = sub;
+    return sub;
   }
 
   getControlBlock(): AgentControlBlock {

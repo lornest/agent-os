@@ -201,7 +201,7 @@ Stand up the message bus so every subsequent component has a communication backb
 | Stream | Subjects | Retention | Purpose |
 |--------|----------|-----------|---------|
 | `AGENT_TASKS` | `agent.*.inbox` | WorkQueue | Direct agent-to-agent commands |
-| `AGENT_EVENTS` | `agent.events.>` | Interest | Pub/sub broadcasts |
+| `AGENT_EVENTS` | `events.agent.>` | Interest | Pub/sub broadcasts |
 | `SYSTEM` | `system.>` | Limits (7d) | Heartbeats, config reload, DLQ |
 
 Configure `max_deliver: 3`, `ack_wait: 30s`, and a dead-letter republish rule that moves failed messages to `system.dlq.>` with failure metadata headers.
@@ -213,7 +213,7 @@ Configure `max_deliver: 3`, `ack_wait: 30s`, and a dead-letter republish rule th
 3. **Implements a Lane Queue** — a per-session serial execution queue. Key sessions by `{agentId}:{channelId}:{userId}`. Only one message processes per lane at a time; others queue in order. This prevents race conditions in agent state.
 4. **Routes messages** by inspecting `AgentMessage.target`:
    - `agent://{id}` → publish to `agent.{id}.inbox`
-   - `topic://{name}` → publish to `agent.events.{name}`
+   - `topic://{name}` → publish to `events.agent.{name}`
 5. **Exposes four messaging patterns** through helper functions:
    - `publish(msg)` — fire-and-forget onto a NATS subject.
    - `request(msg, timeoutMs)` — uses NATS native request/reply with `_INBOX` subjects. Returns the correlated response or throws on timeout.
@@ -724,85 +724,253 @@ Each layer can only remove tools from the set, never add ones denied by a parent
 
 ---
 
-## Phase 5 — Plugin & Skills System (Week 18–20)
+## Phase 5 — Plugin & Skills System (Week 18–20) ✅ COMPLETE
 
 ### Goal
 Enable extensibility without modifying core code — plugins for deep system integration, skills for agent-level knowledge injection.
 
-### What we build
+### Design decisions (simplified from original plan)
 
-**Plugin loader** (`packages/plugins`) — discovers, validates, orders, and loads plugins:
+- **`@agentic-os/plugins` depends only on `@agentic-os/core`** — receives HookRegistry, ToolRegistry, etc. via constructor-injected callbacks. No dependency on agent-runtime or tools packages. Application-level wiring connects them.
+- **`PluginContext.registerTool` gained a `handler` param** — changed from `registerTool(def: ToolDefinition): void` to `registerTool(def: ToolDefinition, handler: ToolHandler): void` so plugins can provide implementations alongside definitions.
+- **`SkillEntry` type added to core** — `formatSkillsSummary` and `createSkillsHandler` updated from `string[]` to `SkillEntry[]` (with `name`, `description`, `filePath`, `metadata`). The prompt section becomes `- skillName: description (path: filePath)` (~24 tokens/skill).
+- **New top-level `skills` config section** — separate from `plugins` config since skills and plugins have different lifecycles (files vs code modules).
+- **Native `fs.watch` for hot-reload** — Node 22 supports `{ recursive: true }` on macOS and Linux. Avoids adding chokidar dependency.
+- **`yaml` + `semver` as new dependencies** — `yaml` for robust SKILL.md frontmatter parsing, `semver` for plugin dependency version checking.
+- **Deferred `PromptCompiler` class** — the existing `registerPromptHandlers()` system from Phase 2 already handles layered prompt assembly via hook priorities. No separate compiler needed.
 
-1. **Discovery**: scan `~/.agentic-os/plugins/` and any paths in `config.plugins.directories[]`. Each plugin is a directory containing a `package.json` with a `agenticOs` field pointing to the entry module, plus a `manifest` section matching `PluginManifest`.
-2. **Dependency resolution**: build a directed acyclic graph from `manifest.dependencies`. Topological sort for load order. Detect and reject circular dependencies. Verify semver compatibility with `semver.satisfies()`.
-3. **Loading**: for each plugin in sorted order, dynamically `import()` the entry module, instantiate the plugin, call `onLoad(ctx)` with a scoped `PluginContext`.
-4. **Hot-reload**: watch plugin directories with chokidar (250ms debounce). On file change:
-   - Call `onUnload()` on the old instance.
-   - Invalidate the module from the import cache (use `import()` with cache-busting query param for ESM: `import(path + '?v=' + Date.now())`).
-   - Re-import and call `onLoad()`.
-   - Re-register all tools, hooks, and commands.
+### What we built
 
-The `PluginContext` provided to each plugin gives access to:
-- `registerTool(def)` — adds a tool to the registry (subject to policy).
-- `registerHook(event, handler)` — subscribes to a lifecycle event with a priority (lower = earlier). Returns a `Disposable` for cleanup.
-- `registerCommand(name, handler)` — adds a slash command for user-facing interaction.
-- `getService(name)` — dependency injection point for core services (gateway, memory, llm).
-- `logger` — namespaced logger (`[plugin:{name}]`).
-- `config` — the plugin's section of the master config.
+**Package:** `packages/plugins/` (`@agentic-os/plugins`) — 12 source files, 96 tests across 10 test suites.
 
-**Hook registry** — a central `HookRegistry` class that manages all lifecycle event subscriptions:
+**Core type extensions** (`packages/core/src/`):
+- New `skills.ts` — `SkillEntry`, `SkillMetadata`, `SkillsConfig` types.
+- Updated `plugins.ts` — `registerTool` now accepts `(def: ToolDefinition, handler: ToolHandler)`.
+- Updated `config.ts` — added optional `skills?: SkillsConfig` to `AgenticOsConfig`.
+- Updated `config-validator.ts` — added `'skills'` to `VALID_TOP_LEVEL_KEYS`.
+- Updated `index.ts` — exported `SkillEntry`, `SkillMetadata`, `SkillsConfig`.
 
-```typescript
-class HookRegistry {
-  private hooks: Map<LifecycleEvent, { priority: number; handler: HookHandler }[]>;
+**Agent-runtime prompt updates** (`packages/agent-runtime/src/`):
+- `formatSkillsSummary(skills: SkillEntry[])` — formats as `- name: description (path: filePath)` per skill.
+- `createSkillsHandler(skills: SkillEntry[], mode)` — injects `<available-skills>` section.
+- `RegisterPromptHandlersParams.skills` changed to `SkillEntry[]`.
+- `AgentManager` gained `setSkills(skills: SkillEntry[])` method, passes skills to `registerPromptHandlers()`.
 
-  register(event: LifecycleEvent, handler: HookHandler, priority = 100): Disposable;
+**Error classes** (`errors.ts`):
+- `PluginLoadError(pluginName, cause?)` — failed to load a plugin.
+- `PluginDependencyError(message)` — unsatisfied dependency.
+- `CyclicDependencyError(cycle: string[])` — circular dependency detected.
+- `SkillGatingError(skillName, reason)` — skill requirements not met.
 
-  async fire(event: LifecycleEvent, context: unknown): Promise<unknown> {
-    const handlers = this.hooks.get(event) ?? [];
-    handlers.sort((a, b) => a.priority - b.priority);
-    let result = context;
-    for (const h of handlers) {
-      result = await h.handler(result);  // Chain: each handler transforms the context
-    }
-    return result;
-  }
-}
-```
+**Dependency resolver** (`dependency-resolver.ts`):
+- `resolveDependencyOrder(plugins: DiscoveredPlugin[]): DiscoveredPlugin[]` — topological sort using Kahn's algorithm.
+- Validates all dependencies exist and semver constraints are satisfied.
+- Throws `CyclicDependencyError` on cycles, `PluginDependencyError` on missing/incompatible deps.
 
-Hooks are **composable transformers**: each receives the context, can modify and return it, and the next hook receives the modified version. A hook can block execution by throwing a `HookBlockError` (used by `tool_call` hooks to deny tool access).
+**Service & command registries:**
+- `ServiceRegistry` — simple `Map<string, unknown>` with `register<T>`, `get<T>`, `has`. Application layer registers core services before plugins load.
+- `CommandRegistry` — `Map<string, CommandHandler>` with `register` (returns `Disposable`), `execute`, `has`, `getAll`, `clear`.
 
-**Skills system** — follows the AgentSkills spec:
+**Plugin context** (`plugin-context-impl.ts`):
+- `createPluginContext(pluginName, callbacks, logger, config)` — factory function returning `{ context, registeredTools[], hookDisposables[], commandDisposables[] }`.
+- Delegates all registrations to application-level callbacks and tracks what was registered for cleanup.
+- Logger prefixed with `[plugin:{name}]`.
 
-1. **Skill format**: a directory with a `SKILL.md` file. YAML frontmatter declares `name`, `description`, and `metadata` (required env vars, required binaries, OS restrictions).
-2. **Discovery**: scan workspace `./skills/`, user `~/.agentic-os/skills/`, and bundled skills. Merge in precedence order (workspace > user > bundled).
-3. **Gating**: at load time, check each skill's requirements. Missing binary → skip with warning. Missing env var → skip with warning. Wrong OS → skip silently.
-4. **Injection**: eligible skills are compiled into a compact catalog injected into the system prompt — just names, descriptions, and file paths (~24 tokens per skill). The agent reads the full `SKILL.md` via the `read_file` tool on demand (lazy loading).
-5. **Hot-reload**: file watcher on skill directories (250ms debounce). On change, refresh the skill snapshot. Active sessions pick up changes on the next turn.
+**Plugin discovery** (`plugin-discovery.ts`):
+- Scans directories for subdirectories containing `package.json` with `agenticOs` field.
+- `agenticOs` field structure: `{ entry: string, manifest: PluginManifest }`.
+- `isPluginEnabled(name, enabled, disabled)` — disabled takes precedence; empty enabled = all.
 
-**System prompt compiler** — the `PromptCompiler` class assembles the full system prompt from layered sections:
+**Plugin loader** (`plugin-loader.ts`) — main orchestrator:
+- `loadAll()` — discover → resolve dependency order → load each in order.
+- `loadPlugin(name, entryPath, directory)` — `import(entryPath + '?v=' + Date.now())` → call `onLoad(ctx)`.
+- `unloadPlugin(name)` — `onUnload()` → dispose hooks/commands → unregister tools.
+- `reloadPlugin(name, entryPath, directory)` — unload → re-import → load.
+- `unloadAll()` — reverse order. `enableHotReload()` / `disableHotReload()`.
+- Error handling: wraps `onLoad` in try/catch, logs error, skips plugin, continues.
 
-```
-[1] Base identity (from SOUL.md or config)
-[2] Built-in tool schemas (bash, read_file, write_file, edit_file + use_mcp_tool meta-tool — full JSON Schema, filtered by policy)
-[3] MCP tool catalog (compact list: name + one-line description per tool, filtered by policy)
-[4] Pinned MCP tool schemas (full JSON Schema for tools listed in agent's mcp_pinned config)
-[5] Safety guardrails
-[6] Skills catalog (compact XML: name + description + path)
-[7] Memory tools available (memory_search, memory_get — agent-initiated, not auto-injected)
-[8] Workspace files (USER.md, AGENTS.md, MEMORY.md — truncated at 20K chars each)
-[9] Sandbox info (if active)
-[10] Runtime info (agent ID, model, channel, OS, timezone)
-```
+**Skill parser** (`skill-parser.ts`):
+- `parseSkillFile(content, filePath): SkillEntry` — extract YAML frontmatter via `yaml` package.
+- `extractFrontmatter(content)` — parse `---` delimited YAML.
+- Falls back to directory name for `name` if frontmatter missing.
 
-Static sections (1-6, 9-10) form a **cacheable prefix** for LLM providers that support prompt caching. Dynamic content (7-8) is appended as a suffix. The compiler supports three modes: `full` (all sections — primary agents), `minimal` (built-in tools + use_mcp_tool + safety + runtime — sub-agents), and `none` (identity only).
+**Skill gating** (`skill-gating.ts`):
+- `checkSkillRequirements(skill): SkillCheckResult` — check binaries (`which`), env vars, OS platform.
+- `filterAvailableSkills(skills, logger): SkillEntry[]` — filters and logs warnings for skipped skills.
+- `isBinaryAvailable(name)`, `isEnvVarSet(name)` — low-level checks.
+
+**Skill discovery** (`skill-discovery.ts`):
+- `discoverSkills(options): Promise<SkillEntry[]>` — scan, parse, gate, merge.
+- `mergeSkillSources(...sources)` — later sources override by name (workspace > user > bundled).
+- `filterByConfig(skills, enabled, disabled)` — disabled wins; empty enabled = all.
+
+**File watcher** (`file-watcher.ts`):
+- `FileWatcher` class wrapping `fs.watch` with `{ recursive: true }`.
+- 250ms debounce by default. Coalesces rapid events into single callback.
+- `watch(directory, callback)`, `close()`.
+
+### Integration with existing code
+
+**No circular dependencies:** `@agentic-os/plugins` depends only on `@agentic-os/core`. Application-level wiring connects plugins to the runtime via existing public APIs:
+- `AgentManager.setSkills()` → inject discovered skills into prompt handlers.
+- `AgentManager.getHookRegistry()` → pass to plugin context callbacks.
+- `AgentManager.setTools()` → register plugin-provided tools.
+
+**Files modified:**
+- `packages/core/src/plugins.ts` — `registerTool` signature adds `handler` param.
+- `packages/core/src/config.ts` — add `skills?: SkillsConfig` to `AgenticOsConfig`.
+- `packages/core/src/config-validator.ts` — add `'skills'` to `VALID_TOP_LEVEL_KEYS`.
+- `packages/core/src/index.ts` — export `SkillEntry`, `SkillMetadata`, `SkillsConfig`.
+- `packages/core/src/skills.ts` — new file with skill types.
+- `packages/agent-runtime/src/prompt-section-builder.ts` — `formatSkillsSummary` takes `SkillEntry[]`.
+- `packages/agent-runtime/src/prompt-handlers.ts` — `createSkillsHandler` takes `SkillEntry[]`.
+- `packages/agent-runtime/src/prompt-assembler.ts` — `RegisterPromptHandlersParams.skills` → `SkillEntry[]`.
+- `packages/agent-runtime/src/agent-manager.ts` — add `setSkills()`, pass skills to prompt handlers.
+- `packages/agent-runtime/tests/prompt-section-builder.test.ts` — updated for `SkillEntry[]`.
+- `packages/agent-runtime/tests/prompt-handlers.test.ts` — updated for `SkillEntry[]`.
+- `packages/agent-runtime/tests/prompt-assembler.test.ts` — updated for `SkillEntry[]`.
+- `packages/plugins/package.json` — add `semver`, `yaml`, `@types/semver`.
+- `packages/plugins/src/index.ts` — full barrel export.
+- `config/default.json5` — add `skills` section.
+- `knip.json` — remove `ignoreDependencies` for plugins.
+
+**Dependencies:** `semver` (plugin version checks), `yaml` (SKILL.md frontmatter parsing), `@types/semver`. No chokidar (using native `fs.watch`).
 
 ### How to verify
-- Plugin loading: create a test plugin that registers a custom tool. Verify the tool appears in the registry and is callable by an agent.
-- Hook composition: register two hooks on `tool_call` — one that logs, one that blocks a specific tool. Verify both fire in priority order and the block prevents execution.
-- Hot-reload: modify a loaded plugin's tool handler on disk. Verify the new behavior takes effect within 1 second without restart.
-- Skill gating: create a skill requiring a non-existent binary. Verify it's skipped with a warning. Create a valid skill; verify it appears in the prompt.
-- Prompt compiler: compile a full prompt for an agent with 3 skills, 5 built-in tools, 20 MCP tools (2 pinned), and memory context. Verify all sections present: built-in schemas in section 2, compact MCP catalog in section 3, pinned MCP schemas in section 4, skills in section 6. Verify total token count is within budget and MCP catalog contributes ~400 tokens (not ~4,000).
+- `turbo run build` — compiles all packages including plugins, no errors.
+- `turbo run check-types` — no TypeScript errors across all packages.
+- `turbo run test` — all 96 plugins tests pass + all existing tests still pass (479 total):
+  - Dependency resolver: linear chain, diamond, cycle detection, missing dep, semver match/mismatch, no deps, empty input, three-node cycle.
+  - Plugin context: tool/hook/command registration delegation, disposable tracking, logger prefixing, config passthrough, multiple registrations.
+  - Plugin discovery: valid/invalid dirs, enabled/disabled lists, manifest parsing, non-existent dir handling, multiple directories, entry path resolution.
+  - Plugin loader: loadAll order, loadPlugin/unloadPlugin lifecycle, unloadAll, error handling, disabled list, tool registration via context, tool unregistration on unload.
+  - Skill parser: full/minimal frontmatter, arrays, missing frontmatter defaults, invalid YAML, non-string filtering, Windows line endings.
+  - Skill gating: no requirements, missing/available binary, missing/set env var, OS check, filterAvailableSkills with logging.
+  - Skill discovery: multi-dir scan, precedence merge, enabled/disabled, gating, empty dirs, non-existent dirs, non-directory entries, missing SKILL.md.
+  - Command registry: register/execute/dispose, unknown command, getAll, clear, async handlers.
+  - Service registry: register/get, unknown service, has, overwrite, type preservation.
+  - File watcher: callback on change, debounce, close stops watching, missing dir, idempotent close.
+- `npx knip` — no unused exports or dependencies.
+- Existing `packages/memory` tests pass unchanged (imports `ToolHandler` from agent-runtime, which re-exports from core).
+
+---
+
+## Phase 5.5 — Single-Agent End-to-End Integration (Week 20–21) ✅ COMPLETE
+
+### Goal
+Wire all completed subsystems (gateway, agent-runtime, memory, tools, plugins) into a runnable application server and validate the full message path: WebSocket client → Gateway → NATS → Agent Runtime → LLM + Tools + Memory → response back to client.
+
+### Why this phase exists
+
+Phases 0–5 built well-tested libraries, but no code connected them into a running system. The REPL (`scripts/repl.mts`) bypasses the gateway entirely — it calls `AgentManager.dispatch()` directly with no NATS, no WebSocket, no tools, no memory. Before Phase 6 (multi-agent), we needed to prove a single agent works end-to-end through the real infrastructure.
+
+### What we built
+
+**Package:** `packages/app/` (`@agentic-os/app`) — 4 source files, 7 unit tests + 6 E2E test files (Docker-dependent).
+
+**Application bootstrap** (`bootstrap.ts`) — the composition root that wires everything together:
+1. Loads and validates config from JSON5.
+2. Starts the `GatewayServer` (NATS + Redis + WebSocket).
+3. For each agent in `config.agents.list`, calls `wireAgent()` which:
+   - Creates `AgentManager` + `LLMService`
+   - Builds `ToolRegistry` with built-in tools (bash, read_file, write_file, edit_file)
+   - Initializes `EpisodicMemoryStore` (SQLite + FTS5) per agent
+   - Registers `memory_search` + `memory_get` tools
+   - Registers `memory_flush` lifecycle hook
+   - Applies `PolicyEngine` to filter effective tools per agent
+   - Loads plugins via `PluginLoader`
+   - Discovers skills via `discoverSkills()`
+   - Subscribes to NATS inbox with response routing
+4. Returns `AppServer` handle with `shutdown()` for graceful cleanup.
+
+**Agent wiring** (`agent-wiring.ts`) — per-agent setup encapsulating tool registry, memory store, plugin loader, policy engine, and NATS inbox subscription into a single `wireAgent()` function.
+
+**Response routing** (`response-router.ts`) — tracks which WS session initiated each request (via correlationId) and routes agent responses back to the correct client.
+
+**Main entry point** (`main.ts`) — reads config, sets up the real `PiMonoProvider`, bootstraps the app, handles SIGINT/SIGTERM.
+
+### Changes to existing packages
+
+**`packages/agent-runtime/src/agent-manager.ts`:**
+- `subscribeToInbox(nats, onResponse?)` — previously had an empty handler. Now extracts user text from `AgentMessage.data` (supports `string` or `{ text: string }` payloads), calls `dispatch()`, and invokes the `onResponse` callback with each `AgentEvent` plus the original message for response routing.
+- Added `AgentMessage` to imports.
+
+**`packages/gateway/src/gateway-server.ts`:**
+- Added `pendingResponses` and `sourceToSession` maps for correlationId → WS session tracking.
+- `handleIncomingMessage()` now accepts and tracks `wsSessionId`.
+- Added `sendResponse(correlationId, response)` — routes responses to originating WS clients.
+- Added `completePendingResponse(correlationId)` — cleanup after final response.
+- Added `getWebSocketServer()` accessor.
+
+**`packages/gateway/src/websocket-server.ts`:**
+- `onMessage` callback signature changed from `MessageHandler` (1 arg) to `WsMessageHandler` (2 args: msg + sessionId).
+- Connection handler now passes `sessionId` to `onMessage`.
+- Exported `WsMessageHandler` type.
+
+**`config/default.json5`:**
+- Uncommented the default agent entry (id: `assistant`, persona: "You are a helpful assistant.").
+- Uncommented the default binding (channel: `default` → agent: `assistant`).
+
+### E2E test infrastructure
+
+**Mock LLM provider** (`tests/e2e/helpers/mock-llm.ts`):
+- `MockLLMProvider` implements `LLMProvider` with deterministic responses.
+- Supports text-only and tool-call responses.
+- Configurable response sequence (round-robins through the list).
+- `callCount` and `reset()` for test assertions.
+
+**WS test client** (`tests/e2e/helpers/ws-client.ts`):
+- `WsTestClient` connects via WebSocket with bearer token auth.
+- `sendToAgent(agentId, text)` — builds and sends an `AgentMessage` envelope.
+- `waitForResponse(correlationId, timeout)` — waits for a specific correlated response.
+- Connection timeout handling, message buffering, clean disconnect.
+
+**Test fixtures** (`tests/e2e/helpers/fixtures.ts`):
+- `writeTestConfig()` — generates a complete JSON5 config with configurable agent entries, ports, tool deny lists, and memory settings.
+- `createNodeFs()`, `createTestLogger()`, temp directory helpers.
+
+**App harness** (`tests/e2e/helpers/app-harness.ts`):
+- `AppHarness` — boots the full stack (gateway + agents + tools + memory) with mock LLM.
+- Manages temp directories, WS client lifecycle, and cleanup.
+
+### Test suites
+
+**Unit tests** (`tests/bootstrap.test.ts` — runs via `turbo run test`):
+- ResponseRouter: track/route/untrack, unknown correlationId, response message building.
+- MockLLMProvider: ordered responses, tool call emission, call counting.
+- **7 tests total.**
+
+**E2E tests** (`tests/e2e/*.test.ts` — require Docker, run via `pnpm test:e2e`):
+1. **Conversation round-trip** — send message via WS, receive response with correct correlationId and agent source.
+2. **Tool execution** — LLM requests `read_file`, agent executes it, response contains file content.
+3. **Session continuity** — 3 sequential messages, 3 sequential responses, LLM called 3 times.
+4. **Tool policy enforcement** — deny `bash` in config, verify agent still produces a response (not a crash).
+5. **Health check** — WS connected, agents wired, agent in READY state.
+6. **Graceful shutdown** — verify clean disconnect and TERMINATED state.
+
+### Integration with existing code
+
+**No circular dependencies.** `@agentic-os/app` depends on all other packages (core, gateway, agent-runtime, memory, tools, plugins). No other package depends back on app. This is the composition root.
+
+**Files modified:**
+- `packages/agent-runtime/src/agent-manager.ts` — enhanced `subscribeToInbox()`.
+- `packages/gateway/src/gateway-server.ts` — response routing, WS session tracking.
+- `packages/gateway/src/websocket-server.ts` — `WsMessageHandler` type, session ID in callback.
+- `packages/gateway/src/index.ts` — exported `WsMessageHandler`.
+- `config/default.json5` — uncommented agent + binding.
+- `knip.json` — added `packages/app` workspace entry.
+- `package.json` — added `start` script.
+
+**Dependencies:** None new. `ws` and `@types/ws` as devDependencies (test client only).
+
+### How to verify
+- `turbo run build` — compiles all packages including app, no errors.
+- `turbo run check-types` — no TypeScript errors across all packages.
+- `turbo run test` — all 486 tests pass (479 existing + 7 new app unit tests).
+- `npx knip` — no unused exports or dependencies.
+- All existing package tests pass unchanged.
+- E2E tests (`pnpm -F @agentic-os/app test:e2e`) validate the full WS → NATS → agent → tools → memory → response path (requires Docker for NATS + Redis).
+- `pnpm start` boots the server with a real LLM provider.
 
 ---
 
@@ -1032,8 +1200,9 @@ One `docker compose up` gets the entire system running.
 | 3 | Memory Subsystem | 10–13 | 13 weeks |
 | 4 | Tool System & Sandbox | 14–17 | 17 weeks |
 | 5 | Plugins & Skills | 18–20 | 20 weeks |
-| 6 | Multi-Agent Orchestration | 21–23 | 23 weeks |
-| 7 | Observability & Security | 24–26 | 26 weeks |
-| 8 | Integration & DX | 27–28 | **28 weeks** |
+| 5.5 | Single-Agent E2E Integration | 20–21 | 21 weeks |
+| 6 | Multi-Agent Orchestration | 22–24 | 24 weeks |
+| 7 | Observability & Security | 25–27 | 27 weeks |
+| 8 | Integration & DX | 28–29 | **29 weeks** |
 
-Each phase produces a testable, working system. Phase 1-2 gives you a single agent talking through the gateway. Phase 3 adds memory. Phase 4 adds tools. Phase 5 makes it extensible. Phase 6 makes it multi-agent. Phase 7 makes it production-grade. Phase 8 makes it usable by others.
+Each phase produces a testable, working system. Phase 1-2 gives you a single agent talking through the gateway. Phase 3 adds memory. Phase 4 adds tools. Phase 5 makes it extensible. Phase 5.5 proves the full single-agent path end-to-end. Phase 6 makes it multi-agent. Phase 7 makes it production-grade. Phase 8 makes it usable by others.

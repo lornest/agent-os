@@ -1,0 +1,37 @@
+{
+  "name": "@agentic-os/channels",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint not yet configured'",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@agentic-os/core": "workspace:*",
+    "@agentic-os/gateway": "workspace:*",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@agentic-os/typescript-config": "workspace:*",
+    "@types/node": "^22.19.11",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

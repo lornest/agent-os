@@ -70,7 +70,7 @@ description: Git commit helper
 # Commit`);
 
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: [],
       logger: makeLogger(),
@@ -83,7 +83,7 @@ description: Git commit helper
 
   it('handles empty directory', async () => {
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: [],
       logger: makeLogger(),
@@ -93,7 +93,17 @@ description: Git commit helper
 
   it('handles non-existent directory', async () => {
     const result = await discoverSkills({
-      workspaceDir: '/non-existent-12345',
+      directories: ['/non-existent-12345'],
+      enabled: [],
+      disabled: [],
+      logger: makeLogger(),
+    });
+    expect(result).toHaveLength(0);
+  });
+
+  it('handles empty directories array', async () => {
+    const result = await discoverSkills({
+      directories: [],
       enabled: [],
       disabled: [],
       logger: makeLogger(),
@@ -114,7 +124,7 @@ description: Review helper
 Content`);
 
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: ['commit'],
       logger: makeLogger(),
@@ -137,7 +147,7 @@ description: Review helper
 Content`);
 
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: ['commit'],
       disabled: [],
       logger: makeLogger(),
@@ -162,15 +172,14 @@ description: workspace commit
 Content`);
 
       const result = await discoverSkills({
-        workspaceDir: tempDir,
-        bundledDir,
+        directories: [bundledDir, tempDir],
         enabled: [],
         disabled: [],
         logger: makeLogger(),
       });
 
       expect(result).toHaveLength(1);
-      // Workspace should override bundled
+      // Later directory (workspace) should override earlier (bundled)
       expect(result[0]!.description).toBe('workspace commit');
     } finally {
       await rm(bundledDir, { recursive: true, force: true });
@@ -193,7 +202,7 @@ description: No requirements
 Content`);
 
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: [],
       logger: makeLogger(),
@@ -206,7 +215,7 @@ Content`);
   it('skips non-directory entries', async () => {
     await writeFile(join(tempDir, 'not-a-dir.txt'), 'just a file');
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: [],
       logger: makeLogger(),
@@ -218,7 +227,7 @@ Content`);
     await mkdir(join(tempDir, 'no-skill'), { recursive: true });
     await writeFile(join(tempDir, 'no-skill', 'README.md'), '# Readme');
     const result = await discoverSkills({
-      workspaceDir: tempDir,
+      directories: [tempDir],
       enabled: [],
       disabled: [],
       logger: makeLogger(),

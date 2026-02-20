@@ -59,6 +59,18 @@ export type {
   SkillsConfig,
 } from './skills.js';
 
+// Channel adaptors
+export type {
+  ChannelAdaptorStatus,
+  ChannelAdaptorInfo,
+  InboundMessage,
+  OutboundMessage,
+  ChannelAdaptorContext,
+  ChannelAdaptor,
+  ChannelsConfig,
+  ChannelAdaptorConfig,
+} from './channels.js';
+
 // Configuration
 export type {
   AgenticOsConfig,

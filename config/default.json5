@@ -23,23 +23,18 @@
       maxTurns: 100,
     },
     list: [
-      // Example agent entry:
-      // {
-      //   id: "assistant",
-      //   name: "Assistant",
-      //   description: "General-purpose assistant agent",
-      //   model: "pi-mono",
-      //   persona: "SOUL.md",
-      //   tools: { allow: ["*"] },
-      //   skills: [],
-      //   mcpPinned: [],
-      // },
+      {
+        id: "assistant",
+        name: "Assistant",
+        description: "General-purpose assistant agent",
+        persona: "You are a helpful assistant.",
+        tools: { allow: ["*"] },
+      },
     ],
   },
 
   bindings: [
-    // Example binding:
-    // { channel: "default", agentId: "assistant" },
+    { channel: "default", agentId: "assistant" },
   ],
 
   models: {
@@ -111,6 +106,18 @@
     directories: [],
     enabled: [],
     disabled: [],
+  },
+
+  channels: {
+    adaptors: {
+      webchat: {
+        enabled: true,
+        settings: {
+          port: 18800,
+          title: "Agent OS WebChat",
+        },
+      },
+    },
   },
 
   memory: {

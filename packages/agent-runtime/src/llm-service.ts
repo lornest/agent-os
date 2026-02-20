@@ -12,24 +12,24 @@ import type { LLMServiceOptions, ActiveBinding } from './types.js';
 import { LLMProviderUnavailableError } from './errors.js';
 
 export class LLMService {
-  private providers: LLMProvider[];
+  private readonly options: LLMServiceOptions;
   private binding: ActiveBinding | null = null;
   private sessionTokenUsage: TokenUsage = { input: 0, output: 0, total: 0 };
 
   constructor(options: LLMServiceOptions) {
-    this.providers = options.providers;
+    this.options = options;
   }
 
   bindSession(sessionId: string): void {
-    for (const provider of this.providers) {
-      this.binding = {
-        providerId: provider.id,
-        profileId: provider.id,
-        sessionId,
-      };
-      return;
+    if (this.options.providers.length === 0) {
+      throw new LLMProviderUnavailableError();
     }
-    throw new LLMProviderUnavailableError();
+    const provider = this.options.providers[0]!;
+    this.binding = {
+      providerId: provider.id,
+      profileId: provider.id,
+      sessionId,
+    };
   }
 
   unbindSession(): void {
@@ -42,18 +42,76 @@ export class LLMService {
     options: CompletionOptions = {},
   ): Promise<StreamResponse> {
     const provider = this.getActiveProvider();
+
+    try {
+      return await this.runCompletion(provider, messages, tools, options);
+    } catch (err) {
+      // Try fallback providers
+      const fallbackIds = this.options.models.fallbacks;
+      let lastError = err;
+
+      for (const fallbackId of fallbackIds) {
+        const fallbackProvider = this.options.providers.find((p) => p.id === fallbackId);
+        if (!fallbackProvider || fallbackProvider.id === provider.id) continue;
+
+        try {
+          return await this.runCompletion(fallbackProvider, messages, tools, options);
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
+        }
+      }
+
+      throw lastError;
+    }
+  }
+
+  async *streamCompletionRaw(
+    messages: Message[],
+    tools: ToolDefinition[],
+    options: CompletionOptions = {},
+  ): AsyncIterable<StreamChunk> {
+    const provider = this.getActiveProvider();
+    yield* provider.streamCompletion(messages, tools, options);
+  }
+
+  async countTokens(messages: Message[]): Promise<number> {
+    const provider = this.getActiveProvider();
+    return provider.countTokens(messages);
+  }
+
+  getSessionTokenUsage(): TokenUsage {
+    return { ...this.sessionTokenUsage };
+  }
+
+  resetSessionTokenUsage(): void {
+    this.sessionTokenUsage = { input: 0, output: 0, total: 0 };
+  }
+
+  private getActiveProvider(): LLMProvider {
+    if (!this.binding) {
+      throw new LLMProviderUnavailableError('No session bound');
+    }
+    const provider = this.options.providers.find((p) => p.id === this.binding!.providerId);
+    if (!provider) {
+      throw new LLMProviderUnavailableError(
+        `Provider ${this.binding.providerId} not found`,
+      );
+    }
+    return provider;
+  }
+
+  private async runCompletion(
+    provider: LLMProvider,
+    messages: Message[],
+    tools: ToolDefinition[],
+    options: CompletionOptions,
+  ): Promise<StreamResponse> {
     let text = '';
     const toolCallMap = new Map<string, ToolCall>();
     let finishReason: string | undefined;
     let usage: TokenUsage | undefined;
 
     for await (const chunk of provider.streamCompletion(messages, tools, options)) {
-      this.processChunk(chunk, { text, toolCallMap, finishReason, usage }, (state) => {
-        text = state.text;
-        finishReason = state.finishReason;
-        usage = state.usage;
-      });
-
       if (chunk.type === 'text_delta' && chunk.text) {
         text += chunk.text;
       } else if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -88,55 +146,5 @@ export class LLMService {
 
     const toolCalls = toolCallMap.size > 0 ? [...toolCallMap.values()] : undefined;
     return { text, toolCalls, finishReason, usage };
-  }
-
-  async *streamCompletionRaw(
-    messages: Message[],
-    tools: ToolDefinition[],
-    options: CompletionOptions = {},
-  ): AsyncIterable<StreamChunk> {
-    const provider = this.getActiveProvider();
-    yield* provider.streamCompletion(messages, tools, options);
-  }
-
-  async countTokens(messages: Message[]): Promise<number> {
-    const provider = this.getActiveProvider();
-    return provider.countTokens(messages);
-  }
-
-  getSessionTokenUsage(): TokenUsage {
-    return { ...this.sessionTokenUsage };
-  }
-
-  resetSessionTokenUsage(): void {
-    this.sessionTokenUsage = { input: 0, output: 0, total: 0 };
-  }
-
-  private getActiveProvider(): LLMProvider {
-    if (!this.binding) {
-      throw new LLMProviderUnavailableError('No session bound');
-    }
-    const provider = this.providers.find((p) => p.id === this.binding!.providerId);
-    if (!provider) {
-      throw new LLMProviderUnavailableError(
-        `Provider ${this.binding.providerId} not found`,
-      );
-    }
-    return provider;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private processChunk(
-    _chunk: StreamChunk,
-    _state: {
-      text: string;
-      toolCallMap: Map<string, ToolCall>;
-      finishReason: string | undefined;
-      usage: TokenUsage | undefined;
-    },
-    _update: (state: { text: string; finishReason?: string; usage?: TokenUsage }) => void,
-  ): void {
-    // Accumulation is handled inline in streamCompletion for clarity.
-    // This method exists as a seam for subclass overrides.
   }
 }

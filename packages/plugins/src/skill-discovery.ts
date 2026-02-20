@@ -86,14 +86,8 @@ export async function discoverSkills(
 ): Promise<SkillEntry[]> {
   const sources: SkillEntry[][] = [];
 
-  if (options.bundledDir) {
-    sources.push(await scanSkillDirectory(options.bundledDir));
-  }
-  if (options.userDir) {
-    sources.push(await scanSkillDirectory(options.userDir));
-  }
-  if (options.workspaceDir) {
-    sources.push(await scanSkillDirectory(options.workspaceDir));
+  for (const dir of options.directories) {
+    sources.push(await scanSkillDirectory(dir));
   }
 
   let skills = mergeSkillSources(...sources);

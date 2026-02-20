@@ -34,4 +34,6 @@ export interface LLMProvider {
   ): AsyncIterable<StreamChunk>;
   countTokens(messages: Message[]): Promise<number>;
   supportsPromptCaching: boolean;
+  /** Optional availability check for fallback selection. */
+  isAvailable?(): Promise<boolean>;
 }

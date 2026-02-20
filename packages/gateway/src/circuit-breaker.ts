@@ -36,6 +36,7 @@ export class CircuitBreaker {
       this.state = 'CLOSED';
       this.failures = [];
       this.openedAt = null;
+      this.options.onStateChange?.('CLOSED');
     }
   }
 
@@ -46,6 +47,7 @@ export class CircuitBreaker {
       this.state = 'OPEN';
       this.openedAt = now;
       this.failures = [now];
+      this.options.onStateChange?.('OPEN');
       return;
     }
 
@@ -55,6 +57,7 @@ export class CircuitBreaker {
     if (this.failures.length >= this.options.failureThreshold) {
       this.state = 'OPEN';
       this.openedAt = now;
+      this.options.onStateChange?.('OPEN');
     }
   }
 

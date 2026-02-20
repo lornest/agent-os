@@ -2,13 +2,16 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { generateId, now } from '@agentic-os/core';
 import type { AgentMessage } from '@agentic-os/core';
-import type { WsSession, MessageHandler } from './types.js';
+import type { WsSession } from './types.js';
+
+/** Handler that receives a message along with its originating WS session ID. */
+export type WsMessageHandler = (msg: AgentMessage, wsSessionId: string) => void;
 
 export interface WebSocketServerOptions {
   port: number;
   host?: string;
   authenticate: (token: string) => Promise<string | null>;
-  onMessage: MessageHandler;
+  onMessage: WsMessageHandler;
 }
 
 export class GatewayWebSocketServer {
@@ -48,7 +51,7 @@ export class GatewayWebSocketServer {
       ws.on('message', (data) => {
         try {
           const msg = JSON.parse(data.toString()) as AgentMessage;
-          options.onMessage(msg);
+          options.onMessage(msg, sessionId);
         } catch {
           ws.send(JSON.stringify({ error: 'Invalid message format' }));
         }

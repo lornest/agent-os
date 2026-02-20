@@ -12,7 +12,9 @@
     "lint": "turbo run lint",
     "dev": "turbo run dev",
     "clean": "turbo run clean",
-    "repl": "tsx scripts/repl.mts"
+    "repl": "tsx scripts/repl.mts",
+    "start": "node packages/app/dist/main.js",
+    "build:sandbox": "docker compose -f docker/docker-compose.yml build sandbox"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

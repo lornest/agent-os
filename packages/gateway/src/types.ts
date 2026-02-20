@@ -11,6 +11,8 @@ export interface CircuitBreakerOptions {
   failureWindowMs: number;
   /** Cooldown in ms before transitioning OPEN → HALF_OPEN. Default: 30_000 */
   cooldownMs: number;
+  /** Called when the circuit state changes (e.g. to OPEN or CLOSED). */
+  onStateChange?: (newState: CircuitState) => void;
 }
 
 /** Key identifying a message ordering lane: `{agentId}:{channelId}:{userId}`. */
@@ -27,7 +29,11 @@ export interface WsSession {
 export interface Subscription {
   subject: string;
   queueGroup?: string;
+  streamName: string;
+  consumerName: string;
   unsubscribe(): void;
+  pause(): void;
+  resume(): Promise<void>;
 }
 
 /** Handler invoked when a message arrives. */

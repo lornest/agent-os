@@ -26,6 +26,14 @@ services:
       timeout: 5s
       retries: 3
 
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sandbox
+    image: agentic-os-sandbox:latest
+    profiles:
+      - sandbox
+
 volumes:
   nats-data:
   redis-data:

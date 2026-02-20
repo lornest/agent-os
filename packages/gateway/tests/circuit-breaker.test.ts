@@ -106,4 +106,60 @@ describe('CircuitBreaker', () => {
     cb.recordSuccess();
     expect(cb.getState()).toBe('CLOSED');
   });
+
+  it('fires onStateChange when transitioning to OPEN', () => {
+    const onStateChange = vi.fn();
+    const cb = new CircuitBreaker({
+      failureThreshold: 3,
+      onStateChange,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      cb.recordFailure();
+    }
+
+    expect(onStateChange).toHaveBeenCalledWith('OPEN');
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires onStateChange when transitioning to CLOSED', () => {
+    const onStateChange = vi.fn();
+    const cb = new CircuitBreaker({
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+      onStateChange,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      cb.recordFailure();
+    }
+    onStateChange.mockClear();
+
+    vi.advanceTimersByTime(30_000);
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    cb.recordSuccess();
+    expect(onStateChange).toHaveBeenCalledWith('CLOSED');
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires onStateChange on HALF_OPEN → OPEN', () => {
+    const onStateChange = vi.fn();
+    const cb = new CircuitBreaker({
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+      onStateChange,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      cb.recordFailure();
+    }
+    onStateChange.mockClear();
+
+    vi.advanceTimersByTime(30_000);
+    cb.recordFailure();
+
+    expect(onStateChange).toHaveBeenCalledWith('OPEN');
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+  });
 });
