@@ -14,6 +14,7 @@
       "ignoreDependencies": ["@agentic-os/core"]
     },
     "packages/channels": {},
+    "packages/ui": {},
     "packages/app": {
       "entry": ["tests/**/*.test.ts"]
     }

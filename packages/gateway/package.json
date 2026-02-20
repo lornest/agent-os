@@ -27,6 +27,9 @@
     "nats": "^2.29.3",
     "ws": "^8.19.0"
   },
+  "optionalDependencies": {
+    "@agentic-os/ui": "workspace:*"
+  },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",
     "@types/node": "^22.19.11",

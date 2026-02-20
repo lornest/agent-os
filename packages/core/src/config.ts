@@ -62,6 +62,11 @@ export interface GatewayConfig {
     host?: string;
   };
   maxConcurrentAgents: number;
+  ui?: {
+    enabled: boolean;
+    title?: string;
+    staticPath?: string;
+  };
 }
 
 export interface AgentsConfig {

@@ -5,7 +5,7 @@ import type {
 } from '@agentic-os/core';
 import { loadConfig } from '@agentic-os/core';
 import { GatewayServer } from '@agentic-os/gateway';
-import { ChannelManager, WebChatAdaptor } from '@agentic-os/channels';
+import { ChannelManager } from '@agentic-os/channels';
 import type { FileSystem, LLMServiceOptions } from '@agentic-os/agent-runtime';
 import { wireAgent } from './agent-wiring.js';
 import type { WiredAgent } from './agent-wiring.js';
@@ -94,7 +94,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
     logger,
   });
 
-  channelManager.register(new WebChatAdaptor());
   await channelManager.startAll();
   logger.info('Channel adaptors started');
 

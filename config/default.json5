@@ -13,6 +13,7 @@
       port: 18789,
     },
     maxConcurrentAgents: 5,
+    ui: { enabled: true, title: "Agent OS" },
   },
 
   agents: {
@@ -109,15 +110,7 @@
   },
 
   channels: {
-    adaptors: {
-      webchat: {
-        enabled: true,
-        settings: {
-          port: 18800,
-          title: "Agent OS WebChat",
-        },
-      },
-    },
+    adaptors: {},
   },
 
   memory: {

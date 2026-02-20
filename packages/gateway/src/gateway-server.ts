@@ -1,12 +1,13 @@
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AgentMessage, GatewayConfig } from '@agentic-os/core';
 import { NatsClient } from './nats-client.js';
 import { RedisClient } from './redis-client.js';
 import { LaneQueue } from './lane-queue.js';
 import { MessageRouter } from './router.js';
 import { GatewayWebSocketServer } from './websocket-server.js';
-import { HealthServer } from './health.js';
+import { StaticServer } from './static-server.js';
 import { CircuitBreaker } from './circuit-breaker.js';
-import type { LaneKey, Subscription } from './types.js';
+import type { HealthStatus, LaneKey, Subscription } from './types.js';
 
 export class GatewayServer {
   private readonly nats = new NatsClient();
@@ -14,9 +15,12 @@ export class GatewayServer {
   private readonly laneQueue = new LaneQueue();
   private readonly router: MessageRouter;
   private readonly ws = new GatewayWebSocketServer();
-  private readonly health = new HealthServer();
   private readonly circuitBreakers = new Map<string, CircuitBreaker>();
   private readonly targetSubscriptions = new Map<string, Subscription>();
+
+  private httpServer: Server | null = null;
+  private staticServer: StaticServer | null = null;
+  private startTime = Date.now();
 
   /** Maps correlationId → WS session ID for response routing. */
   private readonly pendingResponses = new Map<string, string>();
@@ -30,13 +34,28 @@ export class GatewayServer {
   }
 
   async start(): Promise<void> {
+    this.startTime = Date.now();
+
     // Start services in dependency order
     await this.nats.connect(this.config.nats.url, this.config.nats.credentials);
     await this.redis.connect(this.config.redis.url);
 
+    // Initialize static server if UI is enabled
+    if (this.config.ui?.enabled) {
+      this.staticServer = new StaticServer(this.config.ui.staticPath);
+    }
+
+    // Create unified HTTP server
+    this.httpServer = createServer(
+      (req: IncomingMessage, res: ServerResponse) =>
+        this.handleHttpRequest(req, res),
+    );
+
+    // Attach WebSocket to the shared HTTP server
     await this.ws.start({
-      port: this.config.websocket.port,
-      host: this.config.websocket.host,
+      httpServer: this.httpServer,
+      path: '/ws',
+      allowAnonymous: true,
       authenticate: async (token: string) => {
         // Placeholder: accept any non-empty token as userId
         return token || null;
@@ -45,10 +64,52 @@ export class GatewayServer {
         this.handleIncomingMessage(msg, sessionId),
     });
 
-    await this.health.start(this.config.websocket.port + 1, {
-      isNatsConnected: () => this.nats.isConnected(),
-      isRedisConnected: () => this.redis.isConnected(),
+    // Listen on the configured port
+    await new Promise<void>((resolve) => {
+      this.httpServer!.listen(this.config.websocket.port, this.config.websocket.host, resolve);
     });
+  }
+
+  private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    if (req.method !== 'GET') {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+
+    const url = req.url ?? '/';
+
+    // Health endpoints (inlined from HealthServer)
+    if (url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+
+    if (url === '/ready') {
+      const nats = this.nats.isConnected();
+      const redis = this.redis.isConnected();
+      const status: HealthStatus = {
+        status: nats && redis ? 'ok' : 'degraded',
+        nats,
+        redis,
+        uptime: Date.now() - this.startTime,
+      };
+      res.writeHead(nats && redis ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(JSON.stringify(status));
+      return;
+    }
+
+    // Static file serving (SPA)
+    if (this.staticServer) {
+      this.staticServer.handle(req, res);
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
   }
 
   private async handleIncomingMessage(
@@ -125,8 +186,16 @@ export class GatewayServer {
 
   async stop(): Promise<void> {
     // Graceful shutdown in reverse order
-    await this.health.close();
     await this.ws.close();
+    if (this.httpServer) {
+      await new Promise<void>((resolve, reject) => {
+        this.httpServer!.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      this.httpServer = null;
+    }
     await this.redis.close();
     await this.nats.close();
   }

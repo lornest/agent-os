@@ -31,9 +31,8 @@ export type { ParsedTarget } from './router.js';
 export { GatewayWebSocketServer } from './websocket-server.js';
 export type { WebSocketServerOptions, WsMessageHandler } from './websocket-server.js';
 
-// Health server
-export { HealthServer } from './health.js';
-export type { HealthCheckDeps } from './health.js';
+// Static file server
+export { StaticServer } from './static-server.js';
 
 // Gateway server (top-level orchestrator)
 export { GatewayServer } from './gateway-server.js';

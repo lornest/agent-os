@@ -23,13 +23,11 @@
   },
   "dependencies": {
     "@agentic-os/core": "workspace:*",
-    "@agentic-os/gateway": "workspace:*",
-    "ws": "^8.19.0"
+    "@agentic-os/gateway": "workspace:*"
   },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",
     "@types/node": "^22.19.11",
-    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

@@ -30,10 +30,9 @@ vi.mock('../src/websocket-server.js', () => ({
   },
 }));
 
-vi.mock('../src/health.js', () => ({
-  HealthServer: class MockHealthServer {
-    start = vi.fn().mockResolvedValue(undefined);
-    close = vi.fn().mockResolvedValue(undefined);
+vi.mock('../src/static-server.js', () => ({
+  StaticServer: class MockStaticServer {
+    handle = vi.fn();
   },
 }));
 
@@ -42,6 +41,11 @@ const testConfig: GatewayConfig = {
   redis: { url: 'redis://localhost:6379' },
   websocket: { port: 18789 },
   maxConcurrentAgents: 10,
+};
+
+const testConfigWithUi: GatewayConfig = {
+  ...testConfig,
+  ui: { enabled: true, title: 'Test UI' },
 };
 
 function makeMockSubscription(overrides: Partial<Subscription> = {}): Subscription {
@@ -78,6 +82,7 @@ describe('GatewayServer', () => {
     expect(server.getRedisClient().connect).toHaveBeenCalledWith(
       'redis://localhost:6379',
     );
+    await server.stop();
   });
 
   it('stops all services in reverse order', async () => {
@@ -98,5 +103,23 @@ describe('GatewayServer', () => {
     server.registerSubscription('agent://test', sub);
     // No error means success; unregister should also work
     server.unregisterSubscription('agent://test');
+  });
+
+  it('passes httpServer to WebSocket start', async () => {
+    await server.start();
+    const wsServer = server.getWebSocketServer();
+    expect(wsServer.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        httpServer: expect.any(Object),
+        path: '/ws',
+        allowAnonymous: true,
+      }),
+    );
+    await server.stop();
+  });
+
+  it('constructs with UI config', () => {
+    const serverWithUi = new GatewayServer(testConfigWithUi);
+    expect(serverWithUi).toBeDefined();
   });
 });

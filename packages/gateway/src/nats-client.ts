@@ -150,7 +150,7 @@ export class NatsClient {
   ): Promise<Subscription> {
     if (!this.js || !this.jsm) throw new Error('NATS not connected');
 
-    const consumerName = `consumer-${subject.replace(/[.*>]/g, '-')}-${generateId().slice(0, 8)}`;
+    const consumerName = `consumer-${subject.replace(/[.*>]/g, '-')}`;
 
     // Determine which stream this subject belongs to
     const streamName = this.findStreamForSubject(subject);
