@@ -45,3 +45,53 @@ export { agentLoop } from './agent-loop.js';
 
 // Agent manager
 export { AgentManager } from './agent-manager.js';
+
+// PiMono provider
+export { PiMonoProvider } from './pi-mono-provider.js';
+export type { PiMonoProviderOptions } from './pi-mono-provider.js';
+
+// Re-export pi-ai utilities needed by consumers (e.g. REPL)
+export { getModel } from '@mariozechner/pi-ai';
+
+// Prompt enrichment — types
+export type {
+  PromptMode,
+  RuntimeInfo,
+  BootstrapConfig,
+  BootstrapFile,
+  PromptPriorities,
+  PromptAssemblerConfig,
+} from './prompt-types.js';
+export {
+  DEFAULT_PROMPT_PRIORITIES,
+  DEFAULT_BOOTSTRAP_FILES,
+  DEFAULT_BOOTSTRAP_CONFIG,
+} from './prompt-types.js';
+
+// Prompt enrichment — section builder
+export {
+  section,
+  formatToolsSummary,
+  formatSkillsSummary,
+  formatBootstrapFiles,
+} from './prompt-section-builder.js';
+
+// Prompt enrichment — runtime info
+export { collectRuntimeInfo, formatRuntimeInfo } from './runtime-info.js';
+export type { CollectRuntimeInfoParams } from './runtime-info.js';
+
+// Prompt enrichment — bootstrap loader
+export { BootstrapLoader } from './bootstrap-loader.js';
+
+// Prompt enrichment — handlers
+export {
+  appendToSystemPrompt,
+  createToolsHandler,
+  createSkillsHandler,
+  createRuntimeInfoHandler,
+  createBootstrapHandler,
+} from './prompt-handlers.js';
+
+// Prompt enrichment — assembler
+export { registerPromptHandlers } from './prompt-assembler.js';
+export type { RegisterPromptHandlersParams } from './prompt-assembler.js';

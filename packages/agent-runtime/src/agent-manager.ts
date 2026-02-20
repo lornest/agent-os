@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentSnapshot,
   AgentStatus,
+  Disposable,
   Message,
   ToolDefinition,
 } from '@agentic-os/core';
@@ -14,6 +15,9 @@ import { ConversationContext } from './conversation-context.js';
 import { InvalidStateTransitionError } from './errors.js';
 import { HookRegistry } from './hook-registry.js';
 import { LLMService } from './llm-service.js';
+import { registerPromptHandlers } from './prompt-assembler.js';
+import type { PromptMode } from './prompt-types.js';
+import { DEFAULT_BOOTSTRAP_CONFIG } from './prompt-types.js';
 import { SessionStore } from './session-store.js';
 import type { ToolHandlerMap } from './tool-executor.js';
 import type { AgentManagerOptions, FileSystem } from './types.js';
@@ -42,6 +46,8 @@ export class AgentManager {
   private loopIteration = 0;
   private inboxSubscription: Subscription | null = null;
   private persona = '';
+  private promptMode: PromptMode = 'full';
+  private promptDisposables: Disposable[] = [];
   private fs: FileSystem;
   private basePath: string;
   private defaults: AgentManagerOptions['defaults'];
@@ -83,6 +89,23 @@ export class AgentManager {
     this.compactor = new ContextCompactor({
       contextWindow: this.defaults.contextWindow,
       reserveTokens: this.defaults.reserveTokens,
+    });
+
+    // Register prompt enrichment handlers
+    this.promptDisposables = registerPromptHandlers({
+      hooks: this.hooks,
+      agentId: this.agentId,
+      agentName: this.agentEntry.name,
+      agentDir,
+      model: this.defaults.model,
+      basePath: this.basePath,
+      fs: this.fs,
+      getTools: () => this.tools,
+      skills: [],
+      config: {
+        promptMode: this.promptMode,
+        bootstrap: DEFAULT_BOOTSTRAP_CONFIG,
+      },
     });
 
     this.transition('READY' as AgentStatus);
@@ -213,11 +236,20 @@ export class AgentManager {
   }
 
   async terminate(): Promise<void> {
+    for (const d of this.promptDisposables) {
+      d.dispose();
+    }
+    this.promptDisposables = [];
+
     if (this.inboxSubscription) {
       this.inboxSubscription.unsubscribe();
       this.inboxSubscription = null;
     }
     this.transition('TERMINATED' as AgentStatus);
+  }
+
+  setPromptMode(mode: PromptMode): void {
+    this.promptMode = mode;
   }
 
   async subscribeToInbox(nats: NatsClient): Promise<void> {
@@ -248,6 +280,10 @@ export class AgentManager {
 
   getHookRegistry(): HookRegistry {
     return this.hooks;
+  }
+
+  getCurrentSessionId(): string | null {
+    return this.currentSessionId;
   }
 
   getStatus(): AgentStatus {

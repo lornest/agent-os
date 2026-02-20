@@ -65,6 +65,7 @@ export type {
   SandboxConfig,
   DockerConfig,
   PluginsConfig,
+  MemoryConfig,
 } from './config.js';
 
 // Configuration validator

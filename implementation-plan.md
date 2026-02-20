@@ -1,6 +1,6 @@
 # Agentic Operating System — Phased Implementation Plan
 
-> **Stack:** TypeScript · Node.js ≥ 22 · pnpm · Turborepo · pi-mono · NATS JetStream · Redis · Qdrant · SQLite · Docker
+> **Stack:** TypeScript · Node.js ≥ 22 · pnpm · Turborepo · pi-mono · NATS JetStream · Redis · SQLite (FTS5 + sqlite-vec) · Docker
 > **Guiding principle:** Every phase delivers a working, testable system. Each phase extends — never rewrites — the previous one.
 
 ---
@@ -20,7 +20,7 @@ agentic-os/
 │   ├── core/               # Shared types, interfaces, utilities
 │   ├── gateway/            # Central messaging gateway
 │   ├── agent-runtime/      # Agent loop & lifecycle
-│   ├── memory/             # Three-store memory subsystem
+│   ├── memory/             # Episodic memory subsystem (SQLite + FTS5 + sqlite-vec)
 │   ├── tools/              # Tool registry, sandboxing, MCP
 │   ├── plugins/            # Plugin loader & skill system
 │   ├── orchestrator/       # Multi-agent routing
@@ -235,7 +235,7 @@ Configure `max_deliver: 3`, `ack_wait: 30s`, and a dead-letter republish rule th
 
 ---
 
-## Phase 2 — Agent Runtime & Lifecycle (Week 6–9)
+## Phase 2 — Agent Runtime & Lifecycle (Week 6–9) ✅ COMPLETE
 
 ### Goal
 Build the agent execution engine — the loop that calls the LLM, executes tools, and manages agent state transitions.
@@ -366,121 +366,175 @@ On `init()`: load agent config, allocate workspace directory, load persona files
 
 ---
 
-## Phase 3 — Memory Subsystem (Week 10–13)
+## Phase 3 — Memory Subsystem (Week 10–13) ✅ COMPLETE
 
 ### Goal
-Give agents persistent memory across sessions: fast working memory, searchable episodic memory, and structured semantic memory.
+Give agents persistent episodic memory across sessions using SQLite-only storage (no new infrastructure dependencies), with agent-initiated memory tools rather than auto-injection.
 
-### What we build
+### Design decisions (simplified from original plan)
 
-**Store 1: Working Memory (Redis)**
+After comparing our original design against OpenClaw (SQLite-only, agent-initiated search, proven in production) and Claude Code (pure filesystem, no vector search), we simplified Phase 3:
 
-A `WorkingMemoryStore` class backed by Redis hashes:
-- Key schema: `wm:{agentId}:{sessionId}`
-- Stores: current task context, scratchpad notes, last 5-9 conversation turns as a rolling buffer.
-- TTL: session idle timeout (default 30 minutes) with touch-on-access.
-- Methods: `get(key)`, `set(key, value)`, `getSessionBuffer()`, `appendToBuffer(entry)`, `clear()`.
-- Write path: synchronous on every agent step (sub-millisecond, acceptable latency).
+- **SQLite-only** storage (sqlite-vec + FTS5) instead of Qdrant + Redis — zero new infrastructure.
+- **Agent-initiated memory tools** (`memory_search`, `memory_get`) instead of auto-injecting context every turn via `context_assemble` hooks.
+- **Deferred knowledge graph** (entities, relationships, bi-temporal edges) to a later phase.
+- **Skipped Redis working memory** — `ConversationContext` + `SessionStore` from Phase 2 already cover working memory needs.
 
-**Store 2: Episodic Memory (Qdrant)**
+### What we built
 
-A `EpisodicMemoryStore` class backed by Qdrant:
+**Package:** `packages/memory/` (`@agentic-os/memory`) — 13 source files, 83 tests across 9 test suites.
 
-- **Embedding pipeline**: use `@mariozechner/pi-ai`'s embedding support. Fallback chain: OpenAI `text-embedding-3-large` @ 1024 dims → local model → BM25-only.
-- **Chunking**: split text at 400 tokens (~1,600 chars) with 80-token overlap. Chunk boundaries align to sentence endings.
-- **Indexing**: HNSW with `m=16`, `ef_construct=200`. Payload indexes on `agent_id`, `session_id`, `timestamp`, `memory_type`, `importance`.
-- **Write path**: async background pipeline — detect meaningful interaction → embed → upsert.
-- **Importance scoring**: after each completed task, run a lightweight LLM call: "Rate the importance of this interaction for future recall on a scale of 0-1." Store as a filterable payload field.
+**SQLite schema** — one database per agent. WAL mode + `busy_timeout=5000` for concurrency:
 
-**Hybrid search** implementing OpenClaw's proven BM25 + vector fusion:
-
-```typescript
-async function hybridSearch(query: string, options: SearchOptions): Promise<MemoryEntry[]> {
-  const [vectorHits, bm25Hits] = await Promise.allSettled([
-    vectorSearch(query, options.maxResults * 4),
-    bm25Search(query, options.maxResults * 4)
-  ]);
-
-  // Union merge — include candidates from either source
-  const candidates = new Map<string, { vectorScore: number; bm25Score: number }>();
-
-  for (const hit of vectorHits) {
-    candidates.set(hit.id, { vectorScore: hit.score, bm25Score: 0 });
-  }
-  for (const [rank, hit] of bm25Hits.entries()) {
-    const existing = candidates.get(hit.id) ?? { vectorScore: 0, bm25Score: 0 };
-    existing.bm25Score = 1 / (1 + rank);  // Rank-to-score normalization
-    candidates.set(hit.id, existing);
-  }
-
-  // Weighted fusion (vector-dominant)
-  const scored = [...candidates.entries()].map(([id, s]) => ({
-    id,
-    score: 0.7 * s.vectorScore + 0.3 * s.bm25Score
-  }));
-
-  // MMR re-ranking for diversity (λ = 0.6)
-  return mmrRerank(scored, query, options.maxResults, 0.6);
-}
-```
-
-BM25 backed by **SQLite FTS5** — a lightweight SQLite database per agent at `~/.agentic-os/memory/{agentId}.sqlite` with a virtual table for full-text search. Each chunk gets a row in both the FTS table and the vector store, sharing the same ID.
-
-**Store 3: Semantic Memory (SQLite → Neo4j graduation path)**
-
-A `SemanticMemoryStore` class backed initially by SQLite (reusing the per-agent `~/.agentic-os/memory/{agentId}.sqlite` database from the episodic store). This avoids adding Neo4j as an infrastructure dependency until graph traversal queries justify it.
-
-**SQLite schema:**
 ```sql
-CREATE TABLE entities (
+CREATE TABLE chunks (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,
-  embedding BLOB,          -- serialized float32 array
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  importance REAL NOT NULL DEFAULT 0.5,
+  token_count INTEGER NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'conversation',
+  chunk_index INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  metadata TEXT NOT NULL DEFAULT '{}',
+  CHECK (importance >= 0.0 AND importance <= 1.0)
 );
-CREATE INDEX idx_entities_name ON entities(name);
-CREATE INDEX idx_entities_type ON entities(type);
+-- Indexes on agent_id, session_id, created_at, importance, source_type
 
-CREATE TABLE relationships (
-  id TEXT PRIMARY KEY,
-  source_entity_id TEXT NOT NULL REFERENCES entities(id),
-  target_entity_id TEXT NOT NULL REFERENCES entities(id),
-  type TEXT NOT NULL,       -- e.g., "works_at", "knows"
-  weight REAL DEFAULT 1.0,
-  t_valid TEXT,             -- when the fact became true
-  t_invalid TEXT,           -- when the fact ceased to be true
-  t_created TEXT NOT NULL,  -- when we recorded it
-  t_expired TEXT,           -- when we invalidated the record
-  UNIQUE(source_entity_id, target_entity_id, type, t_created)
-);
-CREATE INDEX idx_rel_source ON relationships(source_entity_id);
-CREATE INDEX idx_rel_target ON relationships(target_entity_id);
+-- FTS5 for BM25 keyword search (synced via INSERT/UPDATE/DELETE triggers)
+CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_rowid='rowid');
+
+-- sqlite-vec for vector similarity search (created only if extension loads)
+CREATE VIRTUAL TABLE chunks_vec USING vec0(embedding float[{dimensions}]);
+
+CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
-In this phase, implement the foundation:
-- Entity extraction pipeline: after each session, run an LLM call to extract entities and relationships from the conversation.
-- Entity resolution: cosine similarity on entity name embeddings + LLM-based disambiguation for borderline cases.
-- Bi-temporal edges: every relationship row tracks four timestamps (when the fact became true, when it ceased, when we recorded it, when we invalidated it). New contradicting facts set `t_invalid` on the old row rather than deleting it.
-- Query interface: `getRelatedEntities(name)`, `getFactsAbout(entity)`, `getTemporalFacts(entity, asOfDate)`.
-- The query interface is defined as an abstract `SemanticMemoryStore` interface in `@agentic-os/core`, with `SqliteSemanticMemoryStore` as the initial implementation. When graph traversal depth exceeds 2 hops or entity counts exceed ~100K per agent, swap in a `Neo4jSemanticMemoryStore` implementation — no consumer code changes required.
+**`EpisodicMemoryStore`** (`memory-store.ts`) — the core store class:
+- Constructor: `{ agentId, dbPath, config, embeddingProvider }`
+- `open()` — loads sqlite-vec (graceful fallback if unavailable), creates tables, enables WAL. Tracks `hasVectorSupport: boolean` flag.
+- `close()` — closes db connection.
+- `upsertChunks(chunks[])` — inserts into all three tables (chunks, FTS5, vec) within a transaction.
+- `search(options: SearchOptions)` — hybrid search pipeline (BM25 + vector → fusion → temporal decay → MMR).
+- `get(options: GetOptions)` — retrieve by ID, date, or session.
+- `updateImportance(chunkIds[], importance)` — update scores (clamped to [0, 1]).
+- `stats()` — chunk count, db size, vector support status.
 
-**Memory-aware hooks** — register two hooks into the agent lifecycle:
+**Hybrid search pipeline** (`hybrid-search.ts`) — pure math, no I/O:
+1. Vector search + BM25 search fetch `maxResults × 4` candidates each.
+2. Normalize scores to [0, 1] via min-max normalization.
+3. Union merge with weighted fusion: `0.7 × vectorScore + 0.3 × bm25Score`.
+4. Temporal decay: `score *= 2^(-(daysSinceCreation / halfLifeDays))` (default 30-day half-life).
+5. MMR re-ranking for diversity (lambda=0.6, Jaccard similarity for content distance).
+6. Return top-K results.
+7. Falls back to BM25-only when embeddings unavailable.
 
-1. `memory_flush` (fires before compaction): prompt the agent with a hidden turn — "Write any important facts, decisions, or context you'd want to remember to your memory files." Persist outputs to the episodic store and trigger entity extraction for the semantic store.
-2. `context_assemble` (fires before each LLM call): run hybrid search on the current user message, inject top-K results (default 5) into the system prompt as a `<memory_context>` block.
+**Memory tools** (`memory-tools.ts`) — two `ToolDefinition` objects + `ToolHandler` functions:
+- **`memory_search`** — `{ query, max_results?, min_importance?, date_from?, date_to? }` — runs hybrid search, returns formatted results.
+- **`memory_get`** — `{ id?, date?, session_id?, limit? }` — retrieves specific chunks or daily log content.
+- Both are `readOnly`, `riskLevel: 'green'`. Handler type matches `ToolHandler = (args) => Promise<unknown>` from `agent-runtime/tool-executor.ts`.
 
-**Markdown memory files** (OpenClaw pattern): maintain `MEMORY.md` (curated long-term notes, loaded into main sessions) and `memory/YYYY-MM-DD.md` (daily append-only logs). These serve as human-readable, auditable, portable backups of the memory stores.
+**Memory flush handler** (`memory-flush-handler.ts`) — registered on the `memory_flush` lifecycle event. When `ContextCompactor.compact()` fires the hook:
+1. Extracts conversation history from context.
+2. Scores importance via `HeuristicImportanceScorer`.
+3. Chunks the conversation text.
+4. Embeds chunks (batch, with graceful failure).
+5. Upserts into episodic store.
+6. Returns context unchanged (pass-through).
+
+**Chunker** (`chunker.ts`) — sentence-aligned text chunking:
+- Splits text at sentence boundaries (`.!?` followed by whitespace).
+- Accumulates to ~400 tokens per chunk with 80-token overlap.
+- Token estimation: `Math.ceil(text.length / 4)` (matches existing `PiMonoProvider` heuristic).
+- Handles oversized single sentences by emitting them as standalone chunks.
+
+**Importance scorer** (`importance-scorer.ts`) — heuristic-based (LLM-based scorer can replace it):
+- Boosts: decisions (+0.15), action items (+0.1), Q&A content (+0.05), code (+0.1).
+- Penalizes very short content (-0.1).
+- Clamps result to [0, 1].
+
+**Embedding providers:**
+- `NullEmbeddingProvider` (`embedding-provider.ts`) — returns empty arrays (BM25-only fallback). `dimensions = 0`.
+- `OpenAIEmbeddingProvider` (`openai-embedding-provider.ts`) — direct `fetch()` to OpenAI API (no SDK dependency). Supports `text-embedding-3-large` at 1024 dims, batched at 64 texts per request.
+
+**Daily log helpers** (`daily-log.ts`) — `readDailyLog()`, `listDailyLogs()`, `appendDailyLog()` for reading/writing `memory/YYYY-MM-DD.md` files.
+
+### Integration with existing code
+
+**No circular dependencies:** `@agentic-os/memory` depends on `@agentic-os/core` and `@agentic-os/agent-runtime`. Neither depends back on memory. Wiring happens at the application level via existing public APIs:
+- `AgentManager.getHookRegistry()` → register `memory_flush` handler.
+- `AgentManager.setTools()` → add memory tools + handlers.
+
+**Files modified:**
+- `packages/core/src/config.ts` — added `MemoryConfig` interface and optional `memory?` field to `AgenticOsConfig`.
+- `packages/core/src/config-validator.ts` — added `'memory'` to `VALID_TOP_LEVEL_KEYS` (separate from `REQUIRED_SECTIONS`).
+- `packages/core/src/index.ts` — exported `MemoryConfig` type.
+- `config/default.json5` — added `memory` section with defaults (embedding, search weights, chunking, importance scoring, daily log).
+- `knip.json` — added `packages/memory` workspace entry.
+- `package.json` — added `better-sqlite3` to `pnpm.onlyBuiltDependencies`.
+
+**Dependencies:** `better-sqlite3` (native SQLite bindings), `sqlite-vec` (vector extension, optional), `@types/better-sqlite3`. No OpenAI SDK.
+
+### Configuration
+
+Added to `config/default.json5`:
+```json5
+memory: {
+  enabled: true,
+  embedding: {
+    provider: 'openai',           // 'openai' | 'none'
+    dimensions: 1024,
+    model: 'text-embedding-3-large',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    batchSize: 64,
+  },
+  search: {
+    vectorWeight: 0.7,
+    bm25Weight: 0.3,
+    decayHalfLifeDays: 30,
+    mmrLambda: 0.6,
+    defaultMaxResults: 10,
+  },
+  chunking: {
+    targetTokens: 400,
+    overlapTokens: 80,
+    maxChunkTokens: 600,
+  },
+  importanceScoring: {
+    enabled: true,
+    defaultImportance: 0.5,
+  },
+  dailyLog: {
+    enabled: true,
+    directory: 'memory',
+  },
+},
+```
+
+The `memory` section is optional — when absent, all memory initialization is skipped.
+
+### Deferred to future phases
+- **Knowledge graph** (entities, relationships, bi-temporal edges) — deferred until semantic memory queries justify the complexity.
+- **Redis working memory** — `ConversationContext` + `SessionStore` already cover this.
+- **Auto-injection via `context_assemble` hook** — replaced with agent-initiated `memory_search` tool for simpler, more predictable behavior.
+- **LLM-based importance scoring** — using heuristic scorer for now; LLM-based scorer can be swapped in via the `ImportanceScorer` interface.
 
 ### How to verify
-- Working memory: set/get round-trip in <1ms. Buffer rolls correctly at capacity.
-- Episodic search: index 100 test memories, query semantically, verify top result is relevant. Verify BM25 catches exact keyword matches that vector search misses.
-- Hybrid fusion: query that matches both semantically and lexically scores higher than either-only hits.
-- MMR: query with redundant results returns diverse entries.
-- Semantic graph: extract entities from "Alice works at Acme Corp" → verify entities `Alice` and `Acme Corp` exist in SQLite with a `works_at` relationship row.
-- Bi-temporal: add "Alice joined BigTech" → verify old relationship row gets `t_invalid` set, new row added, and `getFactsAbout("Alice")` returns only the current employer by default.
-- Interface abstraction: verify `SqliteSemanticMemoryStore` and a mock `Neo4jSemanticMemoryStore` both satisfy the `SemanticMemoryStore` interface — confirming the graduation path compiles.
+- `turbo run build` — compiles all packages including memory.
+- `turbo run check-types` — no TypeScript errors.
+- `turbo run test` — all 83 memory tests pass across 9 test files:
+  - Chunker: correct chunk sizes, sentence alignment, overlap, oversized sentence handling.
+  - Hybrid search: normalization, fusion math, temporal decay curve, cosine similarity, MMR diversity.
+  - Memory store: upsert/search/get round-trips with real SQLite, BM25 search, importance updates, metadata preservation, limit enforcement.
+  - Memory tools: valid search returns results, missing query returns error, respects max_results, retrieval by ID/session/date.
+  - Memory flush: conversation is chunked and stored, handles empty history, invalid context, importance scores applied.
+  - Schema: table creation, index creation, FTS5 triggers sync, constraint enforcement, WAL/busy_timeout pragmas.
+  - Embedding providers: NullEmbeddingProvider returns empty arrays, correct dimensions.
+  - Importance scorer: default scores, decision/action/code boosts, short content penalty, clamping.
+  - Daily log: read/write/list/append operations, non-existent file handling.
+  - Graceful degradation: works without sqlite-vec (BM25-only).
+- `npx knip` — no unused exports or dependencies.
 
 ---
 
@@ -657,7 +711,7 @@ Hooks are **composable transformers**: each receives the context, can modify and
 [4] Pinned MCP tool schemas (full JSON Schema for tools listed in agent's mcp_pinned config)
 [5] Safety guardrails
 [6] Skills catalog (compact XML: name + description + path)
-[7] Memory context (injected by memory hook)
+[7] Memory tools available (memory_search, memory_get — agent-initiated, not auto-injected)
 [8] Workspace files (USER.md, AGENTS.md, MEMORY.md — truncated at 20K chars each)
 [9] Sandbox info (if active)
 [10] Runtime info (agent ID, model, channel, OS, timezone)
@@ -704,7 +758,7 @@ Bindings are defined in `config.bindings[]`, each specifying match criteria (`pe
 **Per-agent isolation** — each agent gets a fully isolated runtime:
 - Workspace: `~/.agentic-os/agents/{agentId}/workspace/`
 - Sessions: `~/.agentic-os/agents/{agentId}/sessions/`
-- Memory: separate SQLite (episodic + semantic), Qdrant collection (namespaced by `agentId`).
+- Memory: separate SQLite database per agent (episodic store with FTS5 + sqlite-vec).
 - Config overrides: `agents.list[].{tools, models, sandbox, skills}` override global defaults.
 
 **Cross-agent communication tools** — two tools, disabled by default, enabled per-agent in config:
@@ -860,7 +914,6 @@ agentic-os replay <sessionId>      # Replay a session from audit log
 **Docker Compose stack** — single `docker-compose.yml` that launches:
 - NATS server (with JetStream enabled)
 - Redis
-- Qdrant
 - PostgreSQL (audit log)
 - The gateway process
 - OTel Collector → Jaeger + Prometheus + Grafana

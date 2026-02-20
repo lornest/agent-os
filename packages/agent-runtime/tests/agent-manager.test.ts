@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { AgentEvent, LLMProvider, StreamChunk } from '@agentic-os/core';
+import type { AgentEvent, LLMProvider, Message, StreamChunk } from '@agentic-os/core';
 import { AgentManager } from '../src/agent-manager.js';
 import { LLMService } from '../src/llm-service.js';
 import { InvalidStateTransitionError } from '../src/errors.js';
@@ -268,5 +268,111 @@ describe('AgentManager', () => {
     await collectEvents(manager.dispatch('Hello'));
 
     expect(fired).toContain('before_agent_start');
+  });
+
+  it('prompt enrichment fires during dispatch', async () => {
+    const fs = createMemoryFs();
+    let capturedMessages: Message[] = [];
+
+    const provider: LLMProvider = {
+      id: 'mock',
+      supportsPromptCaching: false,
+      async *streamCompletion(messages: Message[]): AsyncIterable<StreamChunk> {
+        capturedMessages = messages;
+        yield { type: 'text_delta', text: 'ok' };
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } };
+        yield { type: 'done', finishReason: 'stop' };
+      },
+      async countTokens() { return 50; },
+    };
+
+    const llm = new LLMService({
+      providers: [provider],
+      models: { providers: [], fallbacks: [] },
+      auth: { profiles: [] },
+    });
+
+    const manager = new AgentManager({
+      agentEntry: { id: 'agent-1', name: 'Test Agent' },
+      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      basePath: '/data',
+      fs,
+    });
+
+    await manager.init(llm);
+
+    manager.setTools(
+      [{ name: 'search', description: 'Search files', inputSchema: {} }],
+      new Map(),
+    );
+
+    await collectEvents(manager.dispatch('Hello'));
+
+    const systemPrompt = capturedMessages[0]?.content ?? '';
+    // Runtime info should be present (always in full mode)
+    expect(systemPrompt).toContain('<runtime-info>');
+    // Tool summary should be present
+    expect(systemPrompt).toContain('<available-tools>');
+    expect(systemPrompt).toContain('- search: Search files');
+  });
+
+  it('setPromptMode changes enrichment behavior', async () => {
+    const fs = createMemoryFs();
+    let capturedMessages: Message[] = [];
+
+    const provider: LLMProvider = {
+      id: 'mock',
+      supportsPromptCaching: false,
+      async *streamCompletion(messages: Message[]): AsyncIterable<StreamChunk> {
+        capturedMessages = messages;
+        yield { type: 'text_delta', text: 'ok' };
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } };
+        yield { type: 'done', finishReason: 'stop' };
+      },
+      async countTokens() { return 50; },
+    };
+
+    const llm = new LLMService({
+      providers: [provider],
+      models: { providers: [], fallbacks: [] },
+      auth: { profiles: [] },
+    });
+
+    const manager = new AgentManager({
+      agentEntry: { id: 'agent-1', name: 'Test Agent' },
+      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      basePath: '/data',
+      fs,
+    });
+
+    // Set to none before init — no enrichment should happen
+    manager.setPromptMode('none');
+    await manager.init(llm);
+    await collectEvents(manager.dispatch('Hello'));
+
+    const systemPrompt = capturedMessages[0]?.content ?? '';
+    expect(systemPrompt).not.toContain('<runtime-info>');
+    expect(systemPrompt).not.toContain('<available-tools>');
+  });
+
+  it('terminate disposes prompt handlers', async () => {
+    const fs = createMemoryFs();
+    const manager = new AgentManager({
+      agentEntry: { id: 'agent-1', name: 'Test Agent' },
+      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      basePath: '/data',
+      fs,
+    });
+
+    await manager.init(createMockLLMService());
+
+    const hooks = manager.getHookRegistry();
+    // 4 prompt handlers registered
+    expect(hooks.handlerCount('context_assemble')).toBe(4);
+
+    await manager.terminate();
+
+    // All prompt handlers should be cleaned up
+    expect(hooks.handlerCount('context_assemble')).toBe(0);
   });
 });

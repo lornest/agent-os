@@ -16,8 +16,8 @@ const REQUIRED_SECTIONS = [
   'plugins',
 ] as const;
 
-/** All valid top-level keys. */
-const VALID_TOP_LEVEL_KEYS = new Set<string>(REQUIRED_SECTIONS);
+/** All valid top-level keys (required + optional). */
+const VALID_TOP_LEVEL_KEYS = new Set<string>([...REQUIRED_SECTIONS, 'memory']);
 
 export interface ConfigValidationError {
   path: string;

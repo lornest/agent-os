@@ -44,23 +44,23 @@
 
   models: {
     providers: [
-      // {
-      //   id: "pi-mono",
-      //   type: "pi-mono",
-      //   models: ["pi-mono-default"],
-      //   profiles: ["default"],
-      // },
+      {
+        id: "pi-mono",
+        type: "pi-mono",
+        models: ["claude-sonnet-4-20250514"],
+        profiles: ["default"],
+      },
     ],
     fallbacks: [],
   },
 
   auth: {
     profiles: [
-      // {
-      //   id: "default",
-      //   provider: "pi-mono",
-      //   apiKeyEnv: "PI_MONO_API_KEY",
-      // },
+      {
+        id: "default",
+        provider: "anthropic",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+      },
     ],
   },
 
@@ -105,5 +105,36 @@
     directories: [],
     enabled: [],
     disabled: [],
+  },
+
+  memory: {
+    enabled: true,
+    embedding: {
+      provider: 'openai',           // 'openai' | 'none'
+      dimensions: 1024,
+      model: 'text-embedding-3-large',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      batchSize: 64,
+    },
+    search: {
+      vectorWeight: 0.7,
+      bm25Weight: 0.3,
+      decayHalfLifeDays: 30,
+      mmrLambda: 0.6,
+      defaultMaxResults: 10,
+    },
+    chunking: {
+      targetTokens: 400,
+      overlapTokens: 80,
+      maxChunkTokens: 600,
+    },
+    importanceScoring: {
+      enabled: true,
+      defaultImportance: 0.5,
+    },
+    dailyLog: {
+      enabled: true,
+      directory: 'memory',
+    },
   },
 }

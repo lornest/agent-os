@@ -11,15 +11,21 @@
     "check-types": "turbo run check-types",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "repl": "tsx scripts/repl.mts"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "better-sqlite3"
+    ]
   },
   "devDependencies": {
+    "@agentic-os/agent-runtime": "workspace:*",
     "knip": "^5.84.1",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
     "turbo": "^2.8.10",
-    "typescript": "^5.9.3",
-    "prettier": "^3.8.1"
+    "typescript": "^5.9.3"
   }
 }

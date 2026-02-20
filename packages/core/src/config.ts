@@ -9,6 +9,39 @@ export interface AgenticOsConfig {
   tools: ToolsConfig;
   sandbox: SandboxConfig;
   plugins: PluginsConfig;
+  memory?: MemoryConfig;
+}
+
+/** Configuration for the memory subsystem. */
+export interface MemoryConfig {
+  enabled: boolean;
+  embedding: {
+    provider: 'openai' | 'none';
+    dimensions: number;
+    model: string;
+    apiKeyEnv: string;
+    batchSize: number;
+  };
+  search: {
+    vectorWeight: number;
+    bm25Weight: number;
+    decayHalfLifeDays: number;
+    mmrLambda: number;
+    defaultMaxResults: number;
+  };
+  chunking: {
+    targetTokens: number;
+    overlapTokens: number;
+    maxChunkTokens: number;
+  };
+  importanceScoring: {
+    enabled: boolean;
+    defaultImportance: number;
+  };
+  dailyLog: {
+    enabled: boolean;
+    directory: string;
+  };
 }
 
 export interface GatewayConfig {

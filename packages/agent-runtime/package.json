@@ -11,7 +11,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "check-types": "tsc --noEmit",
@@ -21,7 +23,8 @@
   },
   "dependencies": {
     "@agentic-os/core": "workspace:*",
-    "@agentic-os/gateway": "workspace:*"
+    "@agentic-os/gateway": "workspace:*",
+    "@mariozechner/pi-ai": "^0.53.0"
   },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",

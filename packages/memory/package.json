@@ -20,10 +20,14 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@agentic-os/core": "workspace:*"
+    "@agentic-os/core": "workspace:*",
+    "@agentic-os/agent-runtime": "workspace:*",
+    "better-sqlite3": "^11.0.0",
+    "sqlite-vec": "^0.1.7-alpha.2"
   },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",
+    "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^22.19.11",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
