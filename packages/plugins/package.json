@@ -11,7 +11,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "check-types": "tsc --noEmit",
@@ -20,11 +22,14 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@agentic-os/core": "workspace:*"
+    "@agentic-os/core": "workspace:*",
+    "semver": "^7.7.4",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",
     "@types/node": "^22.19.11",
+    "@types/semver": "^7.7.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

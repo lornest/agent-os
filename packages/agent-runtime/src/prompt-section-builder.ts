@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '@agentic-os/core';
+import type { ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { BootstrapFile } from './prompt-types.js';
 
 /** Wraps content in XML-style section tags. */
@@ -13,10 +13,10 @@ export function formatToolsSummary(tools: ToolDefinition[]): string {
   return section('available-tools', lines.join('\n'));
 }
 
-/** Formats skill names as an `<available-skills>` section. */
-export function formatSkillsSummary(skills: string[]): string {
+/** Formats skill entries as an `<available-skills>` section. */
+export function formatSkillsSummary(skills: SkillEntry[]): string {
   if (skills.length === 0) return '';
-  const lines = skills.map((s) => `- ${s}`);
+  const lines = skills.map((s) => `- ${s.name}: ${s.description} (path: ${s.filePath})`);
   return section('available-skills', lines.join('\n'));
 }
 

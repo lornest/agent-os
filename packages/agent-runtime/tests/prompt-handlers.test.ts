@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ToolDefinition } from '@agentic-os/core';
+import type { ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { AssembledContext } from '../src/types.js';
 import { BootstrapLoader } from '../src/bootstrap-loader.js';
 import {
@@ -90,22 +90,27 @@ describe('createToolsHandler', () => {
 });
 
 describe('createSkillsHandler', () => {
+  const skills: SkillEntry[] = [
+    { name: 'commit', description: 'Git commit helper', filePath: '/skills/commit/SKILL.md', metadata: {} },
+    { name: 'review', description: 'Code review assistant', filePath: '/skills/review/SKILL.md', metadata: {} },
+  ];
+
   it('injects skills section in full mode', () => {
-    const handler = createSkillsHandler(['commit', 'review'], 'full');
+    const handler = createSkillsHandler(skills, 'full');
     const result = handler(makeAssembled()) as AssembledContext;
     expect(result.messages[0]!.content).toContain('<available-skills>');
-    expect(result.messages[0]!.content).toContain('- commit');
+    expect(result.messages[0]!.content).toContain('- commit: Git commit helper');
   });
 
   it('skips in minimal mode', () => {
-    const handler = createSkillsHandler(['commit'], 'minimal');
+    const handler = createSkillsHandler([skills[0]!], 'minimal');
     const assembled = makeAssembled();
     const result = handler(assembled);
     expect(result).toBe(assembled);
   });
 
   it('skips in none mode', () => {
-    const handler = createSkillsHandler(['commit'], 'none');
+    const handler = createSkillsHandler([skills[0]!], 'none');
     const assembled = makeAssembled();
     const result = handler(assembled);
     expect(result).toBe(assembled);

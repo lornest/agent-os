@@ -1,4 +1,4 @@
-import type { ToolDefinition } from './tools.js';
+import type { ToolDefinition, ToolHandler } from './tools.js';
 
 /** Capabilities a plugin can declare. */
 export type PluginCapability = 'tools' | 'hooks' | 'commands' | 'skills';
@@ -33,7 +33,7 @@ export interface Logger {
 
 /** Context provided to plugins during onLoad. */
 export interface PluginContext {
-  registerTool(def: ToolDefinition): void;
+  registerTool(def: ToolDefinition, handler: ToolHandler): void;
   registerHook(event: LifecycleEvent, handler: HookHandler): Disposable;
   registerCommand(name: string, handler: CommandHandler): Disposable;
   getService<T>(name: string): T;

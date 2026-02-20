@@ -52,6 +52,13 @@ export type {
   LLMProvider,
 } from './llm.js';
 
+// Skills
+export type {
+  SkillEntry,
+  SkillMetadata,
+  SkillsConfig,
+} from './skills.js';
+
 // Configuration
 export type {
   AgenticOsConfig,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ToolDefinition } from '@agentic-os/core';
+import type { ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { AssembledContext } from '../src/types.js';
 import { HookRegistry } from '../src/hook-registry.js';
 import { registerPromptHandlers } from '../src/prompt-assembler.js';
@@ -127,7 +127,10 @@ describe('registerPromptHandlers', () => {
       basePath: '/data',
       fs,
       getTools: () => tools,
-      skills: ['commit', 'review'],
+      skills: [
+        { name: 'commit', description: 'Git commit helper', filePath: '/skills/commit/SKILL.md', metadata: {} },
+        { name: 'review', description: 'Code review', filePath: '/skills/review/SKILL.md', metadata: {} },
+      ] satisfies SkillEntry[],
       config: { promptMode: 'full', bootstrap: DEFAULT_BOOTSTRAP_CONFIG },
     });
 
@@ -141,7 +144,7 @@ describe('registerPromptHandlers', () => {
     expect(content).toContain('<available-tools>');
     expect(content).toContain('- search: Search files');
     expect(content).toContain('<available-skills>');
-    expect(content).toContain('- commit');
+    expect(content).toContain('- commit: Git commit helper');
     expect(content).toContain('<runtime-info>');
     expect(content).toContain('model: gpt-4');
     expect(content).toContain('<soul>');
@@ -177,7 +180,9 @@ describe('registerPromptHandlers', () => {
       basePath: '/data',
       fs,
       getTools: () => [{ name: 'read', description: 'Read', inputSchema: {} }],
-      skills: ['commit'],
+      skills: [
+        { name: 'commit', description: 'Git commit helper', filePath: '/skills/commit/SKILL.md', metadata: {} },
+      ] satisfies SkillEntry[],
       config: { promptMode: 'minimal', bootstrap: DEFAULT_BOOTSTRAP_CONFIG },
     });
 

@@ -1,4 +1,4 @@
-import type { HookHandler, ToolDefinition } from '@agentic-os/core';
+import type { HookHandler, ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { AssembledContext } from './types.js';
 import type { PromptMode, RuntimeInfo } from './prompt-types.js';
 import type { BootstrapLoader } from './bootstrap-loader.js';
@@ -43,7 +43,7 @@ export function createToolsHandler(
 
 /** Creates a handler that injects `<available-skills>` into the system prompt. */
 export function createSkillsHandler(
-  skills: string[],
+  skills: SkillEntry[],
   mode: PromptMode,
 ): HookHandler {
   return (context: unknown): unknown => {

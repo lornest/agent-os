@@ -107,6 +107,12 @@
     disabled: [],
   },
 
+  skills: {
+    directories: [],
+    enabled: [],
+    disabled: [],
+  },
+
   memory: {
     enabled: true,
     embedding: {

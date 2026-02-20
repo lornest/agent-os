@@ -1,4 +1,4 @@
-import type { Disposable, ToolDefinition } from '@agentic-os/core';
+import type { Disposable, ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { HookRegistry } from './hook-registry.js';
 import type { FileSystem } from './types.js';
 import type { PromptAssemblerConfig } from './prompt-types.js';
@@ -24,7 +24,7 @@ export interface RegisterPromptHandlersParams {
   basePath: string;
   fs: FileSystem;
   getTools: () => ToolDefinition[];
-  skills: string[];
+  skills: SkillEntry[];
   config: PromptAssemblerConfig;
 }
 

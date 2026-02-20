@@ -5,6 +5,7 @@ import type {
   AgentStatus,
   Disposable,
   Message,
+  SkillEntry,
   ToolDefinition,
 } from '@agentic-os/core';
 import { now } from '@agentic-os/core';
@@ -41,6 +42,7 @@ export class AgentManager {
   private compactor: ContextCompactor | null = null;
   private tools: ToolDefinition[] = [];
   private toolHandlers: ToolHandlerMap = new Map();
+  private skillEntries: SkillEntry[] = [];
   private context: ConversationContext | null = null;
   private currentSessionId: string | null = null;
   private loopIteration = 0;
@@ -101,7 +103,7 @@ export class AgentManager {
       basePath: this.basePath,
       fs: this.fs,
       getTools: () => this.tools,
-      skills: [],
+      skills: this.skillEntries,
       config: {
         promptMode: this.promptMode,
         bootstrap: DEFAULT_BOOTSTRAP_CONFIG,
@@ -114,6 +116,10 @@ export class AgentManager {
   setTools(tools: ToolDefinition[], handlers: ToolHandlerMap): void {
     this.tools = tools;
     this.toolHandlers = handlers;
+  }
+
+  setSkills(skills: SkillEntry[]): void {
+    this.skillEntries = skills;
   }
 
   async *dispatch(

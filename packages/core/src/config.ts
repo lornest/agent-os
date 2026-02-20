@@ -1,3 +1,5 @@
+import type { SkillsConfig } from './skills.js';
+
 /** Top-level configuration schema for the Agentic OS. */
 export interface AgenticOsConfig {
   gateway: GatewayConfig;
@@ -10,6 +12,7 @@ export interface AgenticOsConfig {
   sandbox: SandboxConfig;
   plugins: PluginsConfig;
   memory?: MemoryConfig;
+  skills?: SkillsConfig;
 }
 
 /** Configuration for the memory subsystem. */

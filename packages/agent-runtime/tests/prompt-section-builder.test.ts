@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ToolDefinition } from '@agentic-os/core';
+import type { ToolDefinition, SkillEntry } from '@agentic-os/core';
 import type { BootstrapFile } from '../src/prompt-types.js';
 import {
   section,
@@ -41,10 +41,17 @@ describe('formatSkillsSummary', () => {
     expect(formatSkillsSummary([])).toBe('');
   });
 
-  it('formats skills as bullet list in XML tags', () => {
-    const result = formatSkillsSummary(['commit', 'review']);
+  it('formats skill entries as bullet list in XML tags', () => {
+    const skills: SkillEntry[] = [
+      { name: 'commit', description: 'Git commit helper', filePath: '/skills/commit/SKILL.md', metadata: {} },
+      { name: 'review', description: 'Code review assistant', filePath: '/skills/review/SKILL.md', metadata: {} },
+    ];
+    const result = formatSkillsSummary(skills);
     expect(result).toBe(
-      '<available-skills>\n- commit\n- review\n</available-skills>',
+      '<available-skills>\n' +
+      '- commit: Git commit helper (path: /skills/commit/SKILL.md)\n' +
+      '- review: Code review assistant (path: /skills/review/SKILL.md)\n' +
+      '</available-skills>',
     );
   });
 });

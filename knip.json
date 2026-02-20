@@ -9,9 +9,7 @@
     "packages/agent-runtime": {},
     "packages/memory": {},
     "packages/tools": {},
-    "packages/plugins": {
-      "ignoreDependencies": ["@agentic-os/core"]
-    },
+    "packages/plugins": {},
     "packages/orchestrator": {
       "ignoreDependencies": ["@agentic-os/core"]
     }
