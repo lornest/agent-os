@@ -11,7 +11,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "check-types": "tsc --noEmit",
@@ -20,7 +22,8 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@agentic-os/core": "workspace:*"
+    "@agentic-os/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.26.0"
   },
   "devDependencies": {
     "@agentic-os/typescript-config": "workspace:*",

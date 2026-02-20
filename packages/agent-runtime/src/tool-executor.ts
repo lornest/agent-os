@@ -1,7 +1,6 @@
-import type { ToolCall, ToolDefinition, ToolResult } from '@agentic-os/core';
+import type { ToolCall, ToolDefinition, ToolResult, ToolHandler, ToolHandlerMap } from '@agentic-os/core';
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
-export type ToolHandlerMap = Map<string, ToolHandler>;
+export type { ToolHandler, ToolHandlerMap };
 
 export async function executeToolCall(
   call: ToolCall,

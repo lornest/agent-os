@@ -8,9 +8,7 @@
     "packages/gateway": {},
     "packages/agent-runtime": {},
     "packages/memory": {},
-    "packages/tools": {
-      "ignoreDependencies": ["@agentic-os/core"]
-    },
+    "packages/tools": {},
     "packages/plugins": {
       "ignoreDependencies": ["@agentic-os/core"]
     },

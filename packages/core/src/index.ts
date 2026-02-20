@@ -25,6 +25,11 @@ export type {
   ToolDefinition,
   ToolAnnotations,
   ToolResult,
+  ToolHandler,
+  ToolHandlerMap,
+  ToolSource,
+  ToolRegistryEntry,
+  PolicyContext,
 } from './tools.js';
 
 // Plugin system

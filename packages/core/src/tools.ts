@@ -27,3 +27,27 @@ export interface ToolResult {
   error?: string;
   durationMs: number;
 }
+
+/** A function that handles a tool invocation. */
+export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+
+/** Map from tool name to its handler function. */
+export type ToolHandlerMap = Map<string, ToolHandler>;
+
+/** Origin of a tool registration. */
+export type ToolSource = 'builtin' | 'mcp' | 'plugin' | 'memory';
+
+/** Entry in the tool registry combining definition + handler + metadata. */
+export interface ToolRegistryEntry {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+  source: ToolSource;
+  mcpServer?: string;
+}
+
+/** Context passed to the policy engine for permission resolution. */
+export interface PolicyContext {
+  agentId: string;
+  sessionId?: string;
+  sandboxMode?: 'off' | 'non-main' | 'all';
+}

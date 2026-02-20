@@ -538,111 +538,189 @@ The `memory` section is optional — when absent, all memory initialization is s
 
 ---
 
-## Phase 4 — Tool System & Sandboxing (Week 14–17)
+## Phase 4 — Tool System & Sandboxing (Week 14–17) ✅ COMPLETE
 
 ### Goal
 Build a secure, extensible tool execution layer with Docker sandboxing and MCP-based tool registration.
 
-### What we build
+### Design decisions
 
-**Tool registry** (`packages/tools`) — an in-memory registry where tools are registered with their `ToolDefinition` (name, schema, annotations, handler function). The registry is the single source of truth for what tools an agent can invoke.
+- **`ToolHandler`/`ToolHandlerMap` moved to core** — these pure type aliases are imported by both `memory` and `tools`. Moving them to `core/src/tools.ts` avoids a `tools → agent-runtime` dependency. Re-exported from `agent-runtime` for backward compatibility.
+- **Docker via CLI, not dockerode** — shells out to the `docker` CLI using Node's `child_process.execFile`. Matches the project's minimal-dependency philosophy. Scope limited to `create`/`start`/`exec`/`stop`/`rm`.
+- **MCP via `@modelcontextprotocol/sdk`** — official SDK, only new external dependency.
+- **No changes to agent-runtime** — the tool registry + policy engine produce `ToolDefinition[]` + `ToolHandlerMap` that plug directly into the existing `AgentManager.setTools()` API. Application-level wiring connects them.
+- **Tool groups for policy config** — OpenClaw-inspired shorthand (`group:fs`, `group:runtime`, etc.) expanded during policy resolution. Cleaner config for multi-agent setups in Phase 6.
 
-**Layered tool policy engine** — a `PolicyEngine` class that resolves effective permissions for any `(agent, tool, context)` tuple. The policy chain narrows permissions top-to-bottom; deny always wins:
+### What we built
+
+**Package:** `packages/tools/` (`@agentic-os/tools`) — 22 source files, 108 tests across 11 test suites.
+
+**Core type extensions** (`packages/core/src/tools.ts`) — added types shared across packages:
+
+```typescript
+type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+type ToolHandlerMap = Map<string, ToolHandler>;
+type ToolSource = 'builtin' | 'mcp' | 'plugin' | 'memory';
+
+interface ToolRegistryEntry {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+  source: ToolSource;
+  mcpServer?: string;
+}
+
+interface PolicyContext {
+  agentId: string;
+  sessionId?: string;
+  sandboxMode?: 'off' | 'non-main' | 'all';
+}
+```
+
+`agent-runtime/src/tool-executor.ts` now imports `ToolHandler`/`ToolHandlerMap` from core instead of defining locally. `agent-runtime/src/index.ts` re-exports from core for backward compatibility — the `memory` package (which imports `ToolHandler` from `agent-runtime`) continues to work unchanged.
+
+**Tool registry** (`registry.ts`) — central in-memory registry, single source of truth for all tool registrations:
+- `register(definition, handler, source, mcpServer?)` — throws `ToolConflictError` on duplicate name.
+- `unregister(name)`, `get(name)`, `has(name)`, `getAll()`, `getBySource(source)`.
+- `buildHandlerMap(names?)` — returns `ToolHandlerMap` compatible with `executeToolCall()`.
+- `getDefinitions(names?)` — returns `ToolDefinition[]` for LLM context.
+- `clear()`, `size`.
+
+**Error classes** (`errors.ts`) — `ToolConflictError`, `ToolNotFoundError`, `ToolValidationError`, `SandboxError`, `McpConnectionError`.
+
+**Tool groups** (`tool-groups.ts`) — static group definitions for policy shorthand:
+
+```typescript
+const TOOL_GROUPS: Record<string, string[]> = {
+  'group:runtime': ['bash'],
+  'group:fs':      ['read_file', 'write_file', 'edit_file'],
+  'group:fs_read': ['read_file'],
+  'group:fs_write': ['write_file', 'edit_file'],
+  'group:memory':  ['memory_search', 'memory_get'],
+  'group:mcp':     ['use_mcp_tool'],
+};
+```
+
+`expandGroups(entries)` expands `group:*` entries into constituent tool names. Unknown group names pass through as literals.
+
+**Layered tool policy engine** (`policy-engine.ts`) — resolves effective permissions for any `(agent, tool, context)` tuple. The policy chain narrows permissions top-to-bottom; deny always wins:
 
 ```
 Global Policy (config.tools.allow / deny)
   → Agent Policy (agents.list[].tools)
-    → Session Policy (runtime overrides)
-      → Sandbox Policy (sandbox.tools)
 ```
 
-Each layer can only remove tools from the set, never add ones denied by a parent layer. The engine exposes two methods:
-- `getEffectiveBuiltinTools(agentId, sessionContext): ToolDefinition[]` — returns built-in tools (with full JSON Schemas) plus the `use_mcp_tool` meta-tool, plus any pinned MCP tools.
-- `getEffectiveMcpCatalog(agentId, sessionContext): { name: string, description: string }[]` — returns the compact catalog of MCP tools this agent is allowed to access.
+Each layer can only remove tools from the set, never add ones denied by a parent layer. Group expansion (`group:fs`, `group:runtime`, etc.) is applied before matching. The engine exposes three methods:
+- `getEffectiveBuiltinTools(ctx: PolicyContext): ToolDefinition[]` — returns built-in + memory + `use_mcp_tool` meta-tool + pinned MCP tools, filtered by policy.
+- `getEffectiveMcpCatalog(ctx: PolicyContext): { name, description }[]` — returns compact catalog of allowed MCP tools (excludes pinned).
+- `isAllowed(toolName, ctx): boolean` — check a single tool.
 
-**Built-in tools** — implement the foundational four (following pi-mono's philosophy):
-- `bash` — execute a shell command. Pre-execution: parse the command through a **risk classifier** (security is built in from day one, not bolted on later):
-  - GREEN (auto-approve): `ls`, `pwd`, `cat`, `echo`, `head`, `tail`, `wc`, `date`, `whoami`
-  - YELLOW (log + execute): `git`, `grep`, `find`, `npm`, `node`, `python`
-  - RED (require confirmation unless YOLO mode): `rm`, `curl`, `wget`, `docker`, `pip install`
-  - CRITICAL (always block): `rm -rf /`, `dd if=`, fork bombs, `:(){ :|:& };:`, `shutdown`
-  - **Argument sanitization**: reject commands containing `; | && || $() \`` unless explicitly in an allowed pattern.
-  - **Argument separation**: always use `--` before user-provided inputs.
-  - **Argument injection blocking**: block known vectors like `--exec`, `-exec`, `--post-checkout`, `--upload-pack` on git commands.
-- `read_file` — read a file from the workspace, with line range support.
-- `write_file` — create or overwrite a file in the workspace.
-- `edit_file` — apply a string replacement to a file (unique match required).
+**Built-in tools** (`builtin/`) — the foundational four:
 
-**Docker sandboxing** — a `SandboxManager` class that manages container lifecycle:
+*Risk classifier* (`risk-classifier.ts`):
+- `classifyCommandRisk(command): RiskAssessment` — splits chained commands (`&&`, `||`, `;`, `|`), classifies each segment, highest risk wins:
+  - CRITICAL (always block): `rm -rf /`, `dd if=`, fork bombs, `shutdown`, `reboot`, `mkfs`, `init 0`
+  - RED (confirmation required): `rm`, `curl`, `wget`, `docker`, `sudo`, `pip install`, `npm publish`, `chmod`, `chown`
+  - YELLOW (log + execute): `git`, `grep`, `find`, `npm`, `node`, `python`, `make`, `cargo`, `go`
+  - GREEN (auto-approve): `ls`, `pwd`, `cat`, `echo`, `head`, `tail`, `wc`, `date`, `whoami`, `env`, `which`, `true`, `false`, `test`, `printf`
+  - Unknown commands default to YELLOW.
+- `sanitizeArguments(command): string | null` — blocks `$()`, backticks, `LD_PRELOAD=`, `LD_LIBRARY_PATH=`, `PATH=` at start, `--exec`/`-exec` on find/git, `--upload-pack`, `--post-checkout` on git. Returns null if safe.
 
-```typescript
-interface SandboxConfig {
-  mode: "off" | "non-main" | "all";
-  scope: "session" | "agent" | "shared";
-  docker: {
-    image: string;               // Default: "agentic-os-sandbox:latest"
-    memoryLimit: string;         // Default: "512m"
-    cpuLimit: string;            // Default: "1.0"
-    pidsLimit: number;           // Default: 256
-    networkMode: "none" | "bridge";
-    readOnlyRoot: boolean;       // Default: true
-    tmpfsSize: string;           // Default: "100m"
-    timeout: number;             // Default: 30 seconds
-  };
-}
-```
+*Bash tool* (`bash-tool.ts`, `bash-handler.ts`):
+- `bashToolDefinition` — ToolDefinition with `riskLevel: 'red'`, accepts `command` (string, required) and `timeout` (number, optional).
+- `createBashHandler(options): ToolHandler` — flow: classify risk → if CRITICAL, block → sanitize args → if blocked, error → if RED and not yoloMode, error → execute via sandbox or direct `child_process.execFile` → return `{ stdout, stderr, exitCode }`.
 
-The sandbox Dockerfile builds a minimal image with common dev tools. On `executeTool("bash", command)`:
-1. If sandbox mode applies, `SandboxManager.getOrCreate(scope)` returns a running container.
-2. Command executes via `docker exec` with `timeout` wrapper.
-3. Container runs as non-root (`1000:1000`), all capabilities dropped, seccomp profile applied, `/tmp` mounted as `noexec` tmpfs.
-4. Workspace directory bind-mounts as the only writable volume.
+*File tools* (`file-tools.ts`):
+- `readFileToolDefinition` (`riskLevel: 'green'`) — supports `path`, `offset`, `limit`.
+- `writeFileToolDefinition` (`riskLevel: 'yellow'`) — creates parent directories, writes content.
+- `editFileToolDefinition` (`riskLevel: 'yellow'`) — unique string replacement (0 matches = error, >1 matches = error).
+- All paths resolved relative to `workspaceRoot`. Path traversal (`../` escape) blocked.
 
-**MCP integration — Virtual MCP Server with lazy tool loading:**
+*Registration helper* (`register.ts`):
+- `registerBuiltinTools(registry, options)` — creates all handlers via factory functions, registers all 4 built-in tools with `source: 'builtin'`.
 
-Build an MCP server that aggregates external tool backends. The server:
-1. Reads MCP server configurations from `config.tools.mcp_servers[]`, each with a `name`, `transport` (stdio or HTTP+SSE), and connection details.
-2. On startup, connects to each backend and calls `tools/list` to discover available tools.
-3. Namespaces tools by prefixing with the server name: `{serverName}__{toolName}`.
-4. Stores full tool definitions (name, description, JSON Schema, annotations) in the registry as a **backend catalog** — but does **not** inject full schemas into the LLM context.
-5. Listens for `notifications/tools/list_changed` from each backend to refresh dynamically.
+**Docker sandboxing** (`sandbox/`) — container lifecycle management via Docker CLI:
 
-**Lazy loading** — MCP tools follow the same pattern as skills: the LLM sees a compact catalog, not full schemas. The system prompt receives only tool names and one-line descriptions (~20 tokens per tool vs. ~200+ for a full JSON Schema). When the agent decides to use an MCP tool, it follows a two-step flow:
+*Exec utility* (`exec-util.ts`) — promise wrapper for `child_process.execFile` with timeout. Always resolves (never rejects) so callers can inspect stdout/stderr/exitCode.
 
-1. The agent calls the built-in meta-tool `use_mcp_tool(tool: "linear__create_issue", args: { title: "Fix bug" })`.
-2. `use_mcp_tool` looks up the full definition in the registry, validates `args` against the stored JSON Schema, applies the policy engine check, and if valid, strips the namespace prefix and routes to the appropriate backend's `tools/call`. Returns the result directly.
+*Docker CLI wrappers* (`docker-cli.ts`):
+- `dockerCreate(options)` — builds `docker create` with full security hardening: `--memory`, `--cpus`, `--pids-limit`, `--network`, `--read-only` (if configured), `--tmpfs /tmp:rw,noexec,nosuid`, `--security-opt no-new-privileges`, `--cap-drop ALL`, `--user 1000:1000`, workspace bind mount.
+- `dockerStart(id)`, `dockerExec(id, command, timeout)`, `dockerRemove(id)`, `dockerInfo()`.
 
-This avoids the extra LLM round-trip that a separate "fetch schema then call" pattern would require. The agent doesn't need to see the schema — it constructs the arguments from the tool's description (which is in the prompt) and the `use_mcp_tool` handler validates them server-side. If validation fails, the error message includes the relevant schema fields so the agent can self-correct on the next turn.
+*Sandbox manager* (`sandbox-manager.ts`) — higher-level manager:
+- `getOrCreate(scopeKey, workspaceDir)` — reuses containers per scope key (named `agentic-sandbox-{scopeKey}`).
+- `exec(containerId, command, timeout)`, `destroy(scopeKey)`, `destroyAll()`, `isDockerAvailable()`.
 
-The `use_mcp_tool` meta-tool definition in the system prompt:
-```typescript
-{
-  name: "use_mcp_tool",
-  description: "Call an MCP tool by name. See the MCP tool catalog for available tools and their descriptions.",
-  inputSchema: {
-    tool: { type: "string", description: "Namespaced tool name from the catalog" },
-    args: { type: "object", description: "Arguments for the tool" }
-  }
-}
-```
+*Dockerfile* (`docker/Dockerfile.sandbox`) — minimal image based on `node:22-slim` with git, curl, python3. Non-root `sandbox` user (UID/GID 1000). Runs `sleep infinity` to stay alive for `docker exec`.
 
-**Token budget comparison**: 5 MCP servers × 10 tools each = 50 tools. With full schema injection: ~10,000 tokens. With lazy catalog: ~1,000 tokens for the catalog + ~50 tokens for the `use_mcp_tool` definition = ~1,050 tokens. The 10× reduction grows linearly with tool count.
+**MCP integration** (`mcp/`) — MCP client with lazy tool loading using `@modelcontextprotocol/sdk`:
 
-**Fallback for frequently-used tools**: agents can optionally declare `tools.mcp_pinned: ["linear__create_issue", "notion__query_database"]` in their config. Pinned tools get their full schemas injected into the prompt alongside built-in tools, bypassing lazy loading. This gives the agent native tool-calling precision for its most-used MCP tools while keeping the long tail lazy.
+*Client connection* (`mcp-client-connection.ts`) — wraps a single MCP server:
+- `connect()` — `StdioClientTransport` for stdio, `StreamableHTTPClientTransport` for http-sse.
+- `listTools()` — discovers tools, maps to `McpToolInfo`.
+- `callTool(name, args)` — routes to backend, handles errors.
+- `onToolsChanged(callback)` — listens for `notifications/tools/list_changed` for hot-reload.
+- `disconnect()`.
 
-Expose the aggregated tool set as a single MCP server endpoint so external clients can also connect and use the OS's full tool catalog.
+*Client manager* (`mcp-client-manager.ts`) — manages connections to multiple MCP servers:
+- `connectAll()` — connects all configured servers in parallel (`Promise.allSettled`), tolerates partial failures.
+- `connect(config)` — connects one server, discovers tools, namespaces as `{serverName}__{toolName}`, registers in ToolRegistry with `source: 'mcp'`, sets up hot-reload.
+- `disconnect(serverName)` — unregisters all tools from server.
+- `callTool(namespacedName, args)` — routes to correct backend, strips namespace.
+- `getAllTools()` — returns all discovered MCP tools.
+- `getToolSchema(namespacedName)` — returns input schema for validation.
+
+*Schema validator* (`schema-validator.ts`) — lightweight JSON Schema validation for MCP tool args:
+- `validateToolArgs(args, schema): ValidationResult` — checks `required` fields and `properties` type matching (`string`, `number`, `integer`, `boolean`, `object`, `array`).
+- `formatValidationErrors(errors, schema): string` — readable string with schema hints for LLM self-correction.
+
+*Meta-tool* (`use-mcp-tool.ts`):
+- `useMcpToolDefinition` — `name: 'use_mcp_tool'`, accepts `tool_name` (string) and `arguments` (object), `riskLevel: 'yellow'`.
+- `createUseMcpToolHandler(mcpManager, policyEngine, getContext): ToolHandler` — checks policy → validates args against schema → routes via mcpManager → returns result. On validation failure, includes schema fields in error message for self-correction.
+
+*Catalog* (`catalog.ts`):
+- `buildMcpCatalog(allTools, pinnedNames)` — compact `{ name, description }[]` excluding pinned tools.
+- `getPinnedToolDefinitions(pinnedNames, getDefinition)` — full ToolDefinitions for pinned MCP tools.
+- `formatMcpCatalog(catalog)` — XML string (`<available-mcp-tools>`) for system prompt injection.
+
+**Prompt integration** (`prompt-integration.ts`):
+- `createMcpCatalogPromptHandler(getCatalogText): HookHandler` — `context_assemble` hook handler that injects the MCP catalog into the system prompt. Follows the same `appendToSystemPrompt` pattern from `agent-runtime/src/prompt-handlers.ts`.
+
+### Integration with existing code
+
+**No circular dependencies:** `@agentic-os/tools` depends on `@agentic-os/core` and `@modelcontextprotocol/sdk`. Neither `core` nor `agent-runtime` depends back on tools. Wiring happens at the application level via existing public APIs:
+- `AgentManager.setTools()` — accepts `ToolDefinition[]` + `ToolHandlerMap` produced by `ToolRegistry.getDefinitions()` + `ToolRegistry.buildHandlerMap()`.
+- `AgentManager.getHookRegistry()` → register `context_assemble` handler for MCP catalog injection.
+
+**Files modified:**
+- `packages/core/src/tools.ts` — added `ToolHandler`, `ToolHandlerMap`, `ToolSource`, `ToolRegistryEntry`, `PolicyContext`.
+- `packages/core/src/index.ts` — exported new types.
+- `packages/agent-runtime/src/tool-executor.ts` — imports `ToolHandler`/`ToolHandlerMap` from core, re-exports.
+- `packages/agent-runtime/src/index.ts` — re-exports `ToolHandler`/`ToolHandlerMap` from core.
+- `packages/tools/package.json` — added `@modelcontextprotocol/sdk` dependency.
+- `knip.json` — removed `ignoreDependencies: ["@agentic-os/core"]` for tools workspace (now actively used).
+
+**Dependencies:** `@modelcontextprotocol/sdk` (official MCP SDK). No other new dependencies.
+
+### Deferred to future phases
+- **Exposing the aggregated tool set as a single MCP server endpoint** for external clients — deferred until Phase 8 (Integration & DX).
+- **Session-level and sandbox-level policy layers** — the policy engine currently resolves Global → Agent. Session and sandbox layers will be added in Phase 7 (Security Hardening).
 
 ### How to verify
-- Policy engine: define a global allow-all, agent deny `["bash"]`, verify `bash` is excluded from effective tools.
-- Risk classifier: verify `rm -rf /` is CRITICAL, `ls` is GREEN, `curl` is RED.
-- Argument sanitization: verify `find / -exec rm -rf {} \;` is blocked. Verify `git clone --upload-pack=malicious` is blocked. Verify `ls -la` with `--` separation passes.
-- Sandbox: execute `echo "hello"` in a sandboxed container; verify output returned. Execute `curl external.com` with `networkMode: "none"`; verify it fails.
-- MCP discovery: stand up a mock MCP server with two tools; verify the virtual server discovers and namespaces them in the registry.
-- Lazy loading: verify the system prompt contains a compact MCP tool catalog (names + descriptions only), not full JSON Schemas. Verify token count is ~20 tokens per MCP tool.
-- `use_mcp_tool`: call a discovered MCP tool via `use_mcp_tool(tool: "mock__echo", args: {text: "hello"})`; verify server-side validation, routing, and result return.
-- Validation feedback: call `use_mcp_tool` with invalid args; verify the error message includes relevant schema fields for self-correction.
-- Pinned tools: configure `mcp_pinned: ["mock__echo"]` for an agent; verify that tool's full JSON Schema appears in the prompt alongside built-in tools.
-- Tool hot-reload: add a new MCP server to config while running; verify new tools appear in the catalog without restart.
+- `turbo run build` — compiles all packages including tools.
+- `turbo run check-types` — no TypeScript errors.
+- `turbo run test` — all 108 tools tests pass across 11 test files:
+  - Registry: register/get, conflict detection, unregister, source filtering, handler map building, definitions.
+  - Policy engine: allow-all wildcard, agent-level deny, deny-wins-over-wildcard, pinned tools in builtin list, catalog excludes pinned, empty allow = no tools, group expansion in allow/deny lists, unknown groups as literals.
+  - Risk classifier: GREEN/YELLOW/RED/CRITICAL classification, chain classification (highest wins), injection blocking ($(), backticks, LD_PRELOAD, --upload-pack).
+  - Bash handler: execute green command, block critical, block injection, block RED without yolo, allow RED with yolo, sandbox routing, timeout handling.
+  - File tools: read/write/edit operations, line range support, path traversal blocked, unique match enforcement (0 matches = error, >1 matches = error).
+  - Docker CLI: command construction verification with security flags, exec/remove/info.
+  - Sandbox manager: getOrCreate, container reuse, exec delegation, destroy/destroyAll, Docker availability check.
+  - Schema validator: valid args pass, missing required fails, wrong type fails, multiple errors collected, format includes hints.
+  - MCP client manager: connectAll discovery, tool namespacing, call routing, disconnect unregisters, getAllTools.
+  - use_mcp_tool: valid call routing, policy denial, missing args, validation errors with schema hints.
+- `npx knip` — no unused exports or dependencies.
+- All existing tests still pass (especially memory package which imports `ToolHandler` from agent-runtime).
 
 ---
 
