@@ -3,6 +3,7 @@ import type {
   AgentDefaults,
   AgentEvent,
   AgentMessage,
+  BindingOverrides,
   ToolsConfig,
   SandboxConfig,
   PluginsConfig,
@@ -21,7 +22,6 @@ import {
 } from '@agentic-os/tools';
 import {
   EpisodicMemoryStore,
-  NullEmbeddingProvider,
   HeuristicImportanceScorer,
   createMemoryFlushHandler,
   createMemorySearchHandler,
@@ -30,8 +30,8 @@ import {
   memoryGetTool,
   DEFAULT_MEMORY_CONFIG,
   mergeMemoryConfig,
+  resolveEmbeddingProvider,
 } from '@agentic-os/memory';
-import type { EmbeddingProvider } from '@agentic-os/memory';
 import { PluginLoader, discoverSkills } from '@agentic-os/plugins';
 import type { PluginLoaderCallbacks } from '@agentic-os/plugins';
 import type { GatewayServer } from '@agentic-os/gateway';
@@ -40,6 +40,7 @@ import { ResponseRouter } from './response-router.js';
 export interface AgentWiringOptions {
   agentEntry: AgentEntry;
   defaults: AgentDefaults;
+  compaction: { enabled: boolean; reserveTokens: number };
   basePath: string;
   fs: FileSystem;
   llmServiceOptions: LLMServiceOptions;
@@ -55,6 +56,7 @@ export interface AgentWiringOptions {
 export interface WiredAgent {
   manager: AgentManager;
   registry: ToolRegistry;
+  policyEngine: PolicyEngine;
   memoryStore?: EpisodicMemoryStore;
   cleanup: () => Promise<void>;
 }
@@ -67,6 +69,7 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   const {
     agentEntry,
     defaults,
+    compaction,
     basePath,
     fs,
     llmServiceOptions,
@@ -80,7 +83,7 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   } = options;
 
   // 1. Create agent manager + LLM service
-  const manager = new AgentManager({ agentEntry, defaults, basePath, fs });
+  const manager = new AgentManager({ agentEntry, defaults, compaction, basePath, fs });
   const llmService = new LLMService(llmServiceOptions);
   await manager.init(llmService);
   await manager.restoreLastSession();
@@ -101,8 +104,7 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
     const mergedConfig = mergeMemoryConfig(memoryConfig ?? DEFAULT_MEMORY_CONFIG);
     const dbPath = `${basePath}/agents/${agentEntry.id}/memory.db`;
 
-    // Use NullEmbeddingProvider for now (BM25-only)
-    const embeddingProvider: EmbeddingProvider = new NullEmbeddingProvider();
+    const embeddingProvider = resolveEmbeddingProvider(mergedConfig.embedding);
 
     memoryStore = new EpisodicMemoryStore({
       agentId: agentEntry.id,
@@ -197,8 +199,14 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   // 7. Subscribe to NATS inbox with response routing
   const responseRouter = new ResponseRouter(gateway.getWebSocketServer());
 
+  // Save default tools for restoration after binding overrides
+  const defaultTools = effectiveTools;
+  const defaultHandlerMap = handlerMap;
+
+  const natsClient = gateway.getNatsClient();
+
   const inboxSub = await manager.subscribeToInbox(
-    gateway.getNatsClient(),
+    natsClient,
     (event: AgentEvent, originalMsg: AgentMessage) => {
       const correlationId = originalMsg.correlationId ?? originalMsg.id;
 
@@ -211,6 +219,25 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
           manager.getCurrentSessionId() ?? undefined,
         );
         gateway.sendResponse(correlationId, response);
+
+        // Cross-node reply-to routing: forward event to the caller's reply inbox
+        if (originalMsg.replyTo) {
+          try {
+            const replyMsg: AgentMessage = {
+              id: generateId(),
+              specversion: '1.0',
+              type: 'task.response',
+              source: `agent://${agentEntry.id}`,
+              target: originalMsg.source,
+              time: now(),
+              datacontenttype: 'application/json',
+              data: { event },
+              correlationId,
+              causationId: originalMsg.id,
+            };
+            natsClient.publishCore(originalMsg.replyTo, replyMsg);
+          } catch { /* best-effort — caller may have timed out */ }
+        }
       } else if (event.type === 'error') {
         const response: AgentMessage = {
           id: generateId(),
@@ -225,6 +252,13 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
           causationId: originalMsg.id,
         };
         gateway.sendResponse(correlationId, response);
+
+        // Cross-node reply-to routing: forward error to the caller's reply inbox
+        if (originalMsg.replyTo) {
+          try {
+            natsClient.publishCore(originalMsg.replyTo, response);
+          } catch { /* best-effort */ }
+        }
       }
     },
     (originalMsg: AgentMessage) => {
@@ -243,6 +277,36 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
       };
       gateway.sendResponse(correlationId, doneMsg);
       gateway.completePendingResponse(correlationId);
+
+      // Cross-node reply-to routing: signal completion to the caller's reply inbox
+      if (originalMsg.replyTo) {
+        try {
+          natsClient.publishCore(originalMsg.replyTo, doneMsg);
+        } catch { /* best-effort */ }
+      }
+    },
+    // onBeforeDispatch: apply binding overrides
+    (originalMsg: AgentMessage) => {
+      const overridesJson = originalMsg.metadata?.['x-binding-overrides'];
+      if (overridesJson) {
+        try {
+          const overrides = JSON.parse(overridesJson) as BindingOverrides;
+          if (overrides.tools) {
+            const narrowedTools = policyEngine.getEffectiveBuiltinTools({
+              agentId: agentEntry.id,
+              bindingTools: overrides.tools,
+            });
+            const narrowedHandlerMap = registry.buildHandlerMap(
+              narrowedTools.map((t) => t.name),
+            );
+            manager.setTools(narrowedTools, narrowedHandlerMap);
+          }
+        } catch { /* ignore malformed overrides */ }
+      }
+    },
+    // onAfterDispatch: restore default tools
+    () => {
+      manager.setTools(defaultTools, defaultHandlerMap);
     },
   );
 
@@ -253,6 +317,7 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   return {
     manager,
     registry,
+    policyEngine,
     memoryStore,
     cleanup: async () => {
       if (memoryStore) {

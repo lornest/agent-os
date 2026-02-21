@@ -69,6 +69,7 @@ export type {
   ChannelAdaptor,
   ChannelsConfig,
   ChannelAdaptorConfig,
+  ChannelSessionPolicy,
 } from './channels.js';
 
 // Configuration
@@ -79,6 +80,8 @@ export type {
   AgentDefaults,
   AgentEntry,
   Binding,
+  BindingOverrides,
+  ResolvedBinding,
   ModelsConfig,
   ModelProvider,
   AuthConfig,
@@ -92,6 +95,14 @@ export type {
   MemoryConfig,
 } from './config.js';
 
+// Orchestration
+export { TaskPriority } from './orchestration.js';
+export type {
+  ScheduledTask,
+  AgentHealthInfo,
+  OrchestratorConfig,
+} from './orchestration.js';
+
 // Configuration validator
 export {
   validateConfig,
@@ -101,6 +112,9 @@ export type {
   ConfigValidationError,
   ConfigValidationResult,
 } from './config-validator.js';
+
+// Env var config overrides
+export { applyEnvOverrides } from './config-env-overlay.js';
 
 // Utilities
 export { generateId, now, isRecord } from './utils.js';

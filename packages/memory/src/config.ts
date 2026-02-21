@@ -3,7 +3,7 @@ import type { MemoryConfig } from './types.js';
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   enabled: true,
   embedding: {
-    provider: 'openai',
+    provider: 'auto',
     dimensions: 1024,
     model: 'text-embedding-3-large',
     apiKeyEnv: 'OPENAI_API_KEY',

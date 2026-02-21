@@ -41,6 +41,7 @@ export { chunkText, estimateTokens } from './chunker.js';
 // Embedding providers
 export { NullEmbeddingProvider } from './embedding-provider.js';
 export { OpenAIEmbeddingProvider } from './openai-embedding-provider.js';
+export { resolveEmbeddingProvider } from './embedding-resolver.js';
 
 // Hybrid search
 export {

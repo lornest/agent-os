@@ -81,16 +81,16 @@ export class PolicyEngine {
     return allow.has('*') || allow.has(toolName);
   }
 
-  /** Resolve the effective allow/deny sets by layering global + agent policies. */
+  /** Resolve the effective allow/deny sets by layering global + agent + binding policies. */
   private resolveEffectivePolicy(ctx: PolicyContext): {
     allow: Set<string>;
     deny: Set<string>;
   } {
     // Start with global
-    const globalAllow = this.globalTools.allow
+    let allow = this.globalTools.allow
       ? new Set(expandGroups(this.globalTools.allow))
       : new Set<string>(['*']);
-    const globalDeny = this.globalTools.deny
+    const deny = this.globalTools.deny
       ? new Set(expandGroups(this.globalTools.deny))
       : new Set<string>();
 
@@ -99,19 +99,45 @@ export class PolicyEngine {
     if (agent?.tools) {
       if (agent.tools.allow) {
         // Agent allow replaces global allow
-        globalAllow.clear();
+        allow.clear();
         for (const name of expandGroups(agent.tools.allow)) {
-          globalAllow.add(name);
+          allow.add(name);
         }
       }
       if (agent.tools.deny) {
         for (const name of expandGroups(agent.tools.deny)) {
-          globalDeny.add(name);
+          deny.add(name);
         }
       }
     }
 
-    return { allow: globalAllow, deny: globalDeny };
+    // Layer binding-level overrides (can only narrow, never expand)
+    if (ctx.bindingTools) {
+      if (ctx.bindingTools.allow) {
+        const bindingAllow = new Set(expandGroups(ctx.bindingTools.allow));
+        // Intersect: only keep tools in both sets (or matching wildcard)
+        if (!allow.has('*')) {
+          // Intersect the two explicit sets
+          const intersection = new Set<string>();
+          for (const name of allow) {
+            if (bindingAllow.has(name) || bindingAllow.has('*')) {
+              intersection.add(name);
+            }
+          }
+          allow = intersection;
+        } else {
+          // Agent/global is wildcard — binding narrows to its explicit set
+          allow = bindingAllow;
+        }
+      }
+      if (ctx.bindingTools.deny) {
+        for (const name of expandGroups(ctx.bindingTools.deny)) {
+          deny.add(name);
+        }
+      }
+    }
+
+    return { allow, deny };
   }
 
   /** Check if a tool name is in the agent's pinned MCP list. */

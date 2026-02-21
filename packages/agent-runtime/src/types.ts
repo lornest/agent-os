@@ -82,6 +82,7 @@ export interface FileSystem {
 export interface AgentManagerOptions {
   agentEntry: AgentEntry;
   defaults: AgentDefaults;
+  compaction: { enabled: boolean; reserveTokens: number };
   basePath: string;
   fs: FileSystem;
 }

@@ -45,7 +45,16 @@ export interface ChannelsConfig {
   adaptors: Record<string, ChannelAdaptorConfig>;
 }
 
+export interface ChannelSessionPolicy {
+  enabled: boolean;
+  defaultAgent?: string;
+  maxSessions?: number;
+}
+
 export interface ChannelAdaptorConfig {
   enabled: boolean;
   settings?: Record<string, unknown>;
+  allowlist?: string[];
+  dm?: ChannelSessionPolicy;
+  group?: ChannelSessionPolicy;
 }

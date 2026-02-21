@@ -64,7 +64,7 @@ export interface MemoryConfig {
 }
 
 export interface EmbeddingConfig {
-  provider: 'openai' | 'none';
+  provider: 'auto' | 'openai' | 'none';
   dimensions: number;
   model: string;
   apiKeyEnv: string;

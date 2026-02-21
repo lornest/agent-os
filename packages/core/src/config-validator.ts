@@ -17,7 +17,7 @@ const REQUIRED_SECTIONS = [
 ] as const;
 
 /** All valid top-level keys (required + optional). */
-const VALID_TOP_LEVEL_KEYS = new Set<string>([...REQUIRED_SECTIONS, 'memory', 'skills', 'channels']);
+const VALID_TOP_LEVEL_KEYS = new Set<string>([...REQUIRED_SECTIONS, 'memory', 'skills', 'channels', 'orchestrator']);
 
 export interface ConfigValidationError {
   path: string;

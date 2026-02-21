@@ -38,7 +38,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -50,7 +51,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -63,7 +65,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -80,7 +83,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -108,7 +112,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -142,7 +147,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -160,7 +166,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -204,7 +211,8 @@ describe('AgentManager', () => {
 
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -235,7 +243,8 @@ describe('AgentManager', () => {
 
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -251,7 +260,8 @@ describe('AgentManager', () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -294,7 +304,8 @@ describe('AgentManager', () => {
 
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -340,7 +351,8 @@ describe('AgentManager', () => {
 
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });
@@ -355,11 +367,76 @@ describe('AgentManager', () => {
     expect(systemPrompt).not.toContain('<available-tools>');
   });
 
+  it('inbox dispatch without sessionId resets context between calls', async () => {
+    const fs = createMemoryFs();
+    let capturedMessages: Message[] = [];
+    let callCount = 0;
+
+    const provider: LLMProvider = {
+      id: 'mock',
+      supportsPromptCaching: false,
+      async *streamCompletion(messages: Message[]): AsyncIterable<StreamChunk> {
+        callCount++;
+        capturedMessages = messages;
+        yield { type: 'text_delta', text: `Reply ${callCount}` };
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } };
+        yield { type: 'done', finishReason: 'stop' };
+      },
+      async countTokens() { return 50; },
+    };
+
+    const llm = new LLMService({
+      providers: [provider],
+      models: { providers: [], fallbacks: [] },
+      auth: { profiles: [] },
+    });
+
+    const manager = new AgentManager({
+      agentEntry: { id: 'agent-1', name: 'Test Agent' },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
+      basePath: '/data',
+      fs,
+    });
+
+    await manager.init(llm);
+
+    // First dispatch — establishes a session and context
+    await collectEvents(manager.dispatch('First message'));
+    expect(callCount).toBe(1);
+    // Messages should contain system + user ("First message")
+    const firstUserMessages = capturedMessages.filter(m => m.role === 'user');
+    expect(firstUserMessages).toHaveLength(1);
+    expect(firstUserMessages[0]!.content).toBe('First message');
+
+    // Second dispatch WITHOUT sessionId — simulates inbox task.request
+    // First reset context like subscribeToInbox does
+    // Access the internal state via the public-facing dispatch behavior:
+    // Calling dispatch(msg, undefined) while currentSessionId is set
+    // would normally reuse the session. But subscribeToInbox now resets
+    // context and currentSessionId before calling dispatch.
+
+    // Simulate what subscribeToInbox does before dispatch:
+    // @ts-expect-error — accessing private fields for test
+    manager.context = null;
+    // @ts-expect-error — accessing private fields for test
+    manager.currentSessionId = null;
+
+    await collectEvents(manager.dispatch('Second message'));
+    expect(callCount).toBe(2);
+    // Messages should contain system + user ("Second message") ONLY
+    // — no "First message" bleed-through
+    const secondUserMessages = capturedMessages.filter(m => m.role === 'user');
+    expect(secondUserMessages).toHaveLength(1);
+    expect(secondUserMessages[0]!.content).toBe('Second message');
+  });
+
   it('terminate disposes prompt handlers', async () => {
     const fs = createMemoryFs();
     const manager = new AgentManager({
       agentEntry: { id: 'agent-1', name: 'Test Agent' },
-      defaults: { model: 'mock', contextWindow: 4096, reserveTokens: 500, maxTurns: 100 },
+      defaults: { model: 'mock', contextWindow: 4096, maxTurns: 100 },
+      compaction: { enabled: true, reserveTokens: 500 },
       basePath: '/data',
       fs,
     });

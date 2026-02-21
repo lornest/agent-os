@@ -10,6 +10,7 @@ import {
   AckPolicy,
   RetentionPolicy,
   DeliverPolicy,
+  createInbox as natsCreateInbox,
 } from 'nats';
 import { generateId } from '@agentic-os/core';
 import type { AgentMessage } from '@agentic-os/core';
@@ -292,6 +293,52 @@ export class NatsClient {
       if (i >= subParts.length || patParts[i] !== subParts[i]) return false;
     }
     return subParts.length === patParts.length;
+  }
+
+  /**
+   * Publish to core NATS (not JetStream).  Required for reply inbox
+   * subjects (`_INBOX.*`) which aren't captured by any stream.
+   */
+  publishCore(subject: string, msg: AgentMessage): void {
+    if (!this.nc) throw new Error('NATS not connected');
+    this.nc.publish(subject, jc.encode(msg));
+  }
+
+  /**
+   * Ephemeral core NATS subscription (not JetStream).
+   * Used for listening on reply inbox subjects.
+   */
+  subscribeCoreNats(
+    subject: string,
+    handler: (msg: AgentMessage) => void,
+  ): { unsubscribe(): void } {
+    if (!this.nc) throw new Error('NATS not connected');
+    const sub = this.nc.subscribe(subject);
+    this.subscriptions.push(sub);
+
+    const process = async () => {
+      for await (const m of sub) {
+        try {
+          handler(jc.decode(m.data));
+        } catch {
+          // Best-effort — handler errors are swallowed.
+        }
+      }
+    };
+    process();
+
+    return {
+      unsubscribe: () => {
+        sub.unsubscribe();
+        const idx = this.subscriptions.indexOf(sub);
+        if (idx !== -1) this.subscriptions.splice(idx, 1);
+      },
+    };
+  }
+
+  /** Generate a unique reply inbox subject. */
+  createInbox(): string {
+    return natsCreateInbox();
   }
 
   isConnected(): boolean {

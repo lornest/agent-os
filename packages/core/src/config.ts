@@ -1,4 +1,5 @@
 import type { ChannelsConfig } from './channels.js';
+import type { OrchestratorConfig } from './orchestration.js';
 import type { SkillsConfig } from './skills.js';
 
 /** Top-level configuration schema for the Agentic OS. */
@@ -15,13 +16,14 @@ export interface AgenticOsConfig {
   memory?: MemoryConfig;
   skills?: SkillsConfig;
   channels?: ChannelsConfig;
+  orchestrator?: OrchestratorConfig;
 }
 
 /** Configuration for the memory subsystem. */
 export interface MemoryConfig {
   enabled: boolean;
   embedding: {
-    provider: 'openai' | 'none';
+    provider: 'auto' | 'openai' | 'none';
     dimensions: number;
     model: string;
     apiKeyEnv: string;
@@ -77,7 +79,6 @@ export interface AgentsConfig {
 export interface AgentDefaults {
   model: string;
   contextWindow: number;
-  reserveTokens: number;
   maxTurns: number;
 }
 
@@ -93,12 +94,26 @@ export interface AgentEntry {
   mcpPinned?: string[];
 }
 
+export interface BindingOverrides {
+  model?: string;
+  sandbox?: Partial<SandboxConfig>;
+  tools?: { allow?: string[]; deny?: string[] };
+  workspace?: string;
+}
+
 export interface Binding {
   peer?: string;
   channel?: string;
   team?: string;
   account?: string;
   agentId: string;
+  overrides?: BindingOverrides;
+  priority?: number;
+}
+
+export interface ResolvedBinding {
+  agentId: string;
+  binding: Binding;
 }
 
 export interface ModelsConfig {

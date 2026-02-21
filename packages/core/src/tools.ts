@@ -35,7 +35,7 @@ export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
 export type ToolHandlerMap = Map<string, ToolHandler>;
 
 /** Origin of a tool registration. */
-export type ToolSource = 'builtin' | 'mcp' | 'plugin' | 'memory';
+export type ToolSource = 'builtin' | 'mcp' | 'plugin' | 'memory' | 'orchestration';
 
 /** Entry in the tool registry combining definition + handler + metadata. */
 export interface ToolRegistryEntry {
@@ -50,4 +50,5 @@ export interface PolicyContext {
   agentId: string;
   sessionId?: string;
   sandboxMode?: 'off' | 'non-main' | 'all';
+  bindingTools?: { allow?: string[]; deny?: string[] };
 }
