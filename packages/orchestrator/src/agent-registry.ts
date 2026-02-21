@@ -1,0 +1,16 @@
+import type { AgentEvent, AgentStatus } from '@agentic-os/core';
+
+/** A single entry in the agent registry. */
+export interface AgentRegistryEntry {
+  agentId: string;
+  getStatus(): AgentStatus;
+  dispatch(message: string, sessionId?: string): AsyncGenerator<AgentEvent>;
+}
+
+/** Read-only lookup of wired agents. */
+export interface AgentRegistry {
+  get(agentId: string): AgentRegistryEntry | undefined;
+  has(agentId: string): boolean;
+  getAll(): AgentRegistryEntry[];
+  getAvailable(): AgentRegistryEntry[];
+}

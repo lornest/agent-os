@@ -55,12 +55,14 @@ export class AgentManager {
   private fs: FileSystem;
   private basePath: string;
   private defaults: AgentManagerOptions['defaults'];
+  private compaction: AgentManagerOptions['compaction'];
   private agentEntry: AgentManagerOptions['agentEntry'];
 
   constructor(options: AgentManagerOptions) {
     this.agentId = options.agentEntry.id;
     this.agentEntry = options.agentEntry;
     this.defaults = options.defaults;
+    this.compaction = options.compaction;
     this.basePath = options.basePath;
     this.fs = options.fs;
     this.sessionStore = new SessionStore(
@@ -92,7 +94,7 @@ export class AgentManager {
     // Set up compactor
     this.compactor = new ContextCompactor({
       contextWindow: this.defaults.contextWindow,
-      reserveTokens: this.defaults.reserveTokens,
+      reserveTokens: this.compaction.reserveTokens,
     });
 
     // Register prompt enrichment handlers
@@ -297,9 +299,12 @@ export class AgentManager {
     nats: NatsClient,
     onResponse?: (event: AgentEvent, originalMsg: AgentMessage) => void,
     onDone?: (originalMsg: AgentMessage) => void,
+    onBeforeDispatch?: (originalMsg: AgentMessage) => void,
+    onAfterDispatch?: (originalMsg: AgentMessage) => void,
   ): Promise<Subscription> {
     const subject = `agent.${this.agentId}.inbox`;
     const sub = await nats.subscribe(subject, async (msg) => {
+      console.log(`[INBOX] ${this.agentId} received message: type=${msg.type}, replyTo=${msg.replyTo ?? 'none'}`);
       // Extract user text from AgentMessage.data
       const data = msg.data as Record<string, unknown> | string | undefined;
       let userMessage: string;
@@ -308,6 +313,7 @@ export class AgentManager {
       } else if (data && typeof data === 'object' && typeof data['text'] === 'string') {
         userMessage = data['text'];
       } else {
+        console.log(`[INBOX] ${this.agentId} could not extract user message, skipping`);
         return; // Can't extract a user message, skip
       }
 
@@ -317,16 +323,30 @@ export class AgentManager {
           : undefined
       ) ?? undefined;
 
+      // When no explicit sessionId is provided, reset context so each
+      // task.request gets a fresh conversation (no history bleed).
+      if (!sessionId) {
+        this.context = null;
+        this.currentSessionId = null;
+      }
+
+      console.log(`[INBOX] ${this.agentId} dispatching: "${userMessage.slice(0, 80)}..." (status: ${this.status})`);
       try {
+        onBeforeDispatch?.(msg);
         for await (const event of this.dispatch(userMessage, sessionId)) {
+          console.log(`[INBOX] ${this.agentId} event: type=${event.type}`);
           onResponse?.(event, msg);
         }
+        console.log(`[INBOX] ${this.agentId} dispatch complete, calling onDone`);
         onDone?.(msg);
       } catch (err) {
+        console.log(`[INBOX] ${this.agentId} dispatch error: ${err instanceof Error ? err.message : String(err)}`);
         onResponse?.(
           { type: 'error', error: err instanceof Error ? err.message : String(err) },
           msg,
         );
+      } finally {
+        onAfterDispatch?.(msg);
       }
     });
     this.inboxSubscription = sub;

@@ -6,6 +6,7 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   'group:fs_write': ['write_file', 'edit_file'],
   'group:memory': ['memory_search', 'memory_get'],
   'group:mcp': ['use_mcp_tool'],
+  'group:orchestration': ['agent_spawn', 'agent_send'],
 };
 
 /**

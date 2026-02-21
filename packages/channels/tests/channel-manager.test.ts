@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type {
+  AgentMessage,
   Binding,
+  BindingOverrides,
   ChannelAdaptor,
   ChannelAdaptorContext,
   ChannelAdaptorInfo,
@@ -165,5 +167,152 @@ describe('ChannelManager', () => {
     const telegramStatus = statuses.find((s) => s.type === 'telegram');
     expect(telegramStatus?.status).toBe('stopped');
     expect(telegramStatus?.healthy).toBe(false);
+  });
+
+  describe('allowlist enforcement', () => {
+    it('allows authorized peers when allowlist is configured', async () => {
+      const allowlistConfig: ChannelsConfig = {
+        adaptors: {
+          webchat: { enabled: true, allowlist: ['alice', 'bob'] },
+        },
+      };
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings,
+        channelsConfig: allowlistConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      // The adaptor.start is called with a context — we capture it
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+
+      // Authorized sender should succeed
+      await expect(
+        ctx.sendMessage({ text: 'hello', senderId: 'alice' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects unauthorized peers when allowlist is configured', async () => {
+      const allowlistConfig: ChannelsConfig = {
+        adaptors: {
+          webchat: { enabled: true, allowlist: ['alice', 'bob'] },
+        },
+      };
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings,
+        channelsConfig: allowlistConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+
+      // Unauthorized sender should be rejected
+      await expect(
+        ctx.sendMessage({ text: 'hello', senderId: 'mallory' }),
+      ).rejects.toThrow('not in the allowlist');
+    });
+
+    it('allows all peers when no allowlist is set', async () => {
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings,
+        channelsConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+
+      // Any sender should succeed
+      await expect(
+        ctx.sendMessage({ text: 'hello', senderId: 'anyone' }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('binding overrides propagation', () => {
+    it('includes x-binding-overrides in metadata when binding has overrides', async () => {
+      const overrides: BindingOverrides = { tools: { deny: ['bash'] } };
+      const bindingsWithOverrides: Binding[] = [
+        { channel: 'default', agentId: 'assistant', overrides },
+      ];
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings: bindingsWithOverrides,
+        channelsConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+      await ctx.sendMessage({ text: 'hello', senderId: 'user1' });
+
+      // Verify gateway.injectMessage was called with metadata containing overrides
+      expect(gateway.injectMessage).toHaveBeenCalledTimes(1);
+      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      expect(injectedMsg.metadata).toBeDefined();
+      expect(injectedMsg.metadata!['x-binding-overrides']).toBeDefined();
+
+      const parsed = JSON.parse(injectedMsg.metadata!['x-binding-overrides']!) as BindingOverrides;
+      expect(parsed.tools?.deny).toEqual(['bash']);
+    });
+
+    it('does not include x-binding-overrides when binding has no overrides', async () => {
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings,
+        channelsConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+      await ctx.sendMessage({ text: 'hello', senderId: 'user1' });
+
+      expect(gateway.injectMessage).toHaveBeenCalledTimes(1);
+      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      expect(injectedMsg.metadata!['x-binding-overrides']).toBeUndefined();
+    });
+
+    it('preserves other metadata fields when adding overrides', async () => {
+      const overrides: BindingOverrides = { model: 'gpt-4' };
+      const bindingsWithOverrides: Binding[] = [
+        { channel: 'default', agentId: 'assistant', overrides },
+      ];
+      const manager = new ChannelManager({
+        gateway: gateway as any,
+        bindings: bindingsWithOverrides,
+        channelsConfig,
+        logger,
+      });
+      const adaptor = makeMockAdaptor('webchat');
+      manager.register(adaptor);
+      await manager.startAll();
+
+      const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
+      await ctx.sendMessage({ text: 'hello', senderId: 'user1', conversationId: 'conv-1' });
+
+      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      // Original metadata should still be present
+      expect(injectedMsg.metadata!['channelType']).toBe('webchat');
+      expect(injectedMsg.metadata!['senderId']).toBe('user1');
+      expect(injectedMsg.metadata!['conversationId']).toBe('conv-1');
+      // Overrides should also be present
+      const parsed = JSON.parse(injectedMsg.metadata!['x-binding-overrides']!) as BindingOverrides;
+      expect(parsed.model).toBe('gpt-4');
+    });
   });
 });

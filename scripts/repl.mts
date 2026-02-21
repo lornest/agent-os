@@ -60,8 +60,11 @@ function createManager(
     defaults: {
       model: 'pi-mono',
       contextWindow,
-      reserveTokens: 20000,
       maxTurns: 100,
+    },
+    compaction: {
+      enabled: true,
+      reserveTokens: 20000,
     },
     basePath: BASE_PATH,
     fs: nodeFs,

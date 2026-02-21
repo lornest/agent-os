@@ -4,7 +4,7 @@ import { validateConfig, loadConfig } from '../src/index.js';
 
 const VALID_CONFIG = `{
   gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789 }, maxConcurrentAgents: 5 },
-  agents: { defaults: { model: "pi-mono", contextWindow: 128000, reserveTokens: 20000, maxTurns: 100 }, list: [] },
+  agents: { defaults: { model: "pi-mono", contextWindow: 128000, maxTurns: 100 }, list: [] },
   bindings: [],
   models: { providers: [], fallbacks: [] },
   auth: { profiles: [] },

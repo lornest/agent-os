@@ -72,6 +72,9 @@ importers:
       '@agentic-os/memory':
         specifier: workspace:*
         version: link:../memory
+      '@agentic-os/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
       '@agentic-os/plugins':
         specifier: workspace:*
         version: link:../plugins

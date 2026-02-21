@@ -20,15 +20,21 @@
     defaults: {
       model: "pi-mono",
       contextWindow: 128000,
-      reserveTokens: 20000,
       maxTurns: 100,
     },
     list: [
       {
         id: "assistant",
         name: "Assistant",
-        description: "General-purpose assistant agent",
-        persona: "You are a helpful assistant.",
+        description: "General-purpose assistant that can delegate research to the researcher agent",
+        persona: "You are a helpful assistant. You have access to a researcher agent via the agent_send tool. When the user asks a question that would benefit from deep research or analysis, delegate it to the researcher by calling agent_send with targetAgent: 'researcher' and waitForReply: true. Synthesize the researcher's reply into your final answer.",
+        tools: { allow: ["*"] },
+      },
+      {
+        id: "researcher",
+        name: "Researcher",
+        description: "Research specialist that investigates topics in depth",
+        persona: "You are a research specialist. When you receive a message from another agent, investigate the topic thoroughly using your available tools. Be detailed and cite your sources. Return a comprehensive answer.",
         tools: { allow: ["*"] },
       },
     ],
@@ -113,10 +119,17 @@
     adaptors: {},
   },
 
+  orchestrator: {
+    // maxConcurrentAgents: 5,   // falls back to gateway.maxConcurrentAgents
+    spawnTimeoutMs: 120000,       // 2 minutes
+    sendReplyTimeoutMs: 120000,   // 2 minutes
+    maxExchanges: 5,
+  },
+
   memory: {
     enabled: true,
     embedding: {
-      provider: 'openai',           // 'openai' | 'none'
+      provider: 'auto',             // 'auto' | 'openai' | 'none'
       dimensions: 1024,
       model: 'text-embedding-3-large',
       apiKeyEnv: 'OPENAI_API_KEY',

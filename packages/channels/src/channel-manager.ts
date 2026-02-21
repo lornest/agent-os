@@ -95,14 +95,31 @@ export class ChannelManager {
 
     const ctx: ChannelAdaptorContext = {
       sendMessage: async (inbound: InboundMessage): Promise<string> => {
-        const agentId = resolveAgent(
+        // Enforce allowlist if configured
+        if (adaptorConfig.allowlist && adaptorConfig.allowlist.length > 0) {
+          if (!adaptorConfig.allowlist.includes(inbound.senderId)) {
+            throw new Error(
+              `Sender "${inbound.senderId}" is not in the allowlist for channel "${channelType}"`,
+            );
+          }
+        }
+
+        const resolved = resolveAgent(
           this.bindings,
           channelType,
           inbound.senderId,
           inbound.conversationId,
         );
 
-        const agentMsg = buildAgentMessage(inbound, channelType, agentId);
+        const agentMsg = buildAgentMessage(inbound, channelType, resolved.agentId);
+
+        // Propagate binding overrides via metadata
+        if (resolved.binding.overrides) {
+          agentMsg.metadata = {
+            ...agentMsg.metadata,
+            'x-binding-overrides': JSON.stringify(resolved.binding.overrides),
+          };
+        }
         const correlationId = agentMsg.correlationId!;
 
         // Register a response listener before injecting so we don't miss it.
@@ -129,7 +146,7 @@ export class ChannelManager {
       },
 
       resolveAgent: (ct: string, senderId: string, conversationId?: string): string => {
-        return resolveAgent(this.bindings, ct, senderId, conversationId);
+        return resolveAgent(this.bindings, ct, senderId, conversationId).agentId;
       },
 
       logger: this.logger,

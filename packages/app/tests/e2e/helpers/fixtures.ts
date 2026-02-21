@@ -93,7 +93,6 @@ export async function writeTestConfig(
     defaults: {
       model: "mock",
       contextWindow: 128000,
-      reserveTokens: 20000,
       maxTurns: 10,
     },
     list: ${JSON.stringify(agents)},

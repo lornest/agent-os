@@ -974,96 +974,215 @@ Phases 0–5 built well-tested libraries, but no code connected them into a runn
 
 ---
 
-## Phase 6 — Multi-Agent Orchestration (Week 21–23)
+## Pre-Phase 6 — Configuration System Refactoring ✅ COMPLETE
+
+### Goal
+Address config gaps identified by comparing with OpenClaw before starting Phase 6. Our config was agent-centric and channel-poor where it needed to be session-aware and channel-rich.
+
+### What we built
+
+Six changes shipped as a single refactoring pass:
+
+1. **Deduplicated `reserveTokens`** — removed from `AgentDefaults`, kept only in `session.compaction`. `AgentManagerOptions` now requires a `compaction: { enabled: boolean; reserveTokens: number }` field. Reserve tokens is a compaction concern, not a model default.
+
+2. **Enriched bindings** — `Binding` gained `overrides?: BindingOverrides` and `priority?: number`. `BindingOverrides` allows per-route `model`, `sandbox`, `tools`, and `workspace` customization. `resolveAgent()` now returns `ResolvedBinding { agentId, binding }` instead of a plain string. Priority is used as a base score before specificity points in the scoring algorithm.
+
+3. **Promoted channel config** — `ChannelAdaptorConfig` gained `allowlist?: string[]`, `dm?: ChannelSessionPolicy`, and `group?: ChannelSessionPolicy`. Allowlist enforcement is wired into the `sendMessage` path (rejects unauthorized peers). DM/group policy fields are defined but enforcement is deferred to Phase 6.
+
+4. **Embedding auto-selection** — provider type expanded to `'auto' | 'openai' | 'none'`. New `resolveEmbeddingProvider(config)` auto-detects OpenAI when the API key env var is set, falls back to `NullEmbeddingProvider`. Default changed from `'openai'` to `'auto'`. Agent wiring uses the resolver instead of hardcoding `NullEmbeddingProvider`.
+
+5. **Env var config overrides** — `applyEnvOverrides(config)` reads `AGENTIC_OS_`-prefixed env vars and applies nested overrides (`__` separates levels). Type coercion for numbers and booleans. Called in `bootstrap.ts` after `loadConfig()`, kept separate from `validateConfig()` to avoid env pollution in tests.
+
+6. **PolicyEngine binding layer** — `PolicyContext` gained `bindingTools?: { allow?: string[]; deny?: string[] }`. `resolveEffectivePolicy()` now resolves Global → Agent → Binding (3 layers). Binding allow intersects (can only narrow, never expand), binding deny stacks (additive). Threading binding overrides through the message handling path is Phase 6 wiring.
+
+### New types exported from `@agentic-os/core`
+
+- `BindingOverrides` — per-binding model/sandbox/tools/workspace overrides
+- `ResolvedBinding` — `{ agentId: string; binding: Binding }`
+- `ChannelSessionPolicy` — `{ enabled: boolean; defaultAgent?: string; maxSessions?: number }`
+- `applyEnvOverrides()` — env var config overlay utility
+
+### Impact on later phases
+
+- Phase 6: `resolveAgent()` already returns `ResolvedBinding` with the full binding including overrides. Wire `binding.overrides.tools` into `PolicyContext.bindingTools` during message dispatch. Use `binding.overrides.model` and `binding.overrides.sandbox` when configuring spawned agent sessions.
+- Phase 7: Policy engine already has 3 layers (Global → Agent → Binding). Session-level policy is the remaining layer. Full session-type taxonomy (`dm | group | spawn | cron`) is Phase 7 scope. Channel allowlist is already enforced.
+- Phase 8: Docker/CI deployments can override any config value via `AGENTIC_OS_*` env vars without editing config files. Embedding auto-detection reduces setup friction.
+
+### How to verify
+- `turbo run build` — 10/10 packages pass.
+- `check-types` — all backend packages pass (UI has pre-existing error unrelated to this work).
+- `turbo run test` — 407 tests pass across 6 packages (0 failures), including ~30 new tests.
+- `npx knip` — zero unused exports or dependencies.
+- `config/default.json5` loads and validates correctly.
+
+---
+
+## Phase 6 — Multi-Agent Orchestration (Week 22–24) ✅ COMPLETE
 
 ### Goal
 Support multiple agents running concurrently with configurable routing, cross-agent communication, and orchestration patterns.
 
-### What we build
+### Design decisions
 
-**Agent router** (`packages/orchestrator`) — resolves which agent handles an incoming message using a priority-based binding cascade:
+1. **Agent Router lives in `packages/orchestrator/`** — the binding resolver in channels is pure scoring. The router adds runtime concerns (availability, circuit breaking) that need agent status. Channels stays stateless.
+2. **Binding override wiring at the app layer** — `wireAgent()` propagates `ResolvedBinding.binding.overrides` via message metadata (`x-binding-overrides`), then recomputes tools per-request in the inbox handler. `setTools()` is called before dispatch with narrowed tools and restored after. No race condition because dispatch is serialized per agent via the lane queue.
+3. **Cross-agent tools call `dispatch()` directly** — `agent_spawn` and `agent_send` use an `AgentRegistry` (read-only lookup of wired agents) injected at bootstrap. No NATS hop for in-process agent-to-agent calls. NATS-based cross-node is future scope.
+4. **Scheduler wraps the dispatch path** — sits between message arrival and `dispatch()`. Manages a concurrency-limited priority queue. Wired at bootstrap.
+5. **Orchestration patterns are tools, not plugins** — Supervisor/Pipeline/Broadcast are `ToolDefinition` + handler factories registered via `ToolRegistry`, same as memory tools. They compose `agent_spawn` internally. No PluginLoader involvement.
 
+### What we built
+
+**Package:** `packages/orchestrator/` (`@agentic-os/orchestrator`) — 11 source files, 68 tests across 8 test suites.
+
+**Core type extensions** (`packages/core/src/orchestration.ts`):
+- `TaskPriority` enum (`USER=1`, `DELEGATION=2`, `BACKGROUND=3`).
+- `ScheduledTask` — queued task with id, agentId, message, priority, enqueuedAt.
+- `AgentHealthInfo` — per-agent circuit state tracking.
+- `OrchestratorConfig` — `maxConcurrentAgents`, `spawnTimeoutMs`, `sendReplyTimeoutMs`, `maxExchanges`.
+- Added `orchestrator?: OrchestratorConfig` to `AgenticOsConfig`.
+- Added `'orchestration'` to `ToolSource` union.
+- Added `'orchestrator'` to config validator's `VALID_TOP_LEVEL_KEYS`.
+- Added `'group:orchestration': ['agent_spawn', 'agent_send']` to tool groups.
+
+**Agent registry** (`agent-registry.ts`) — read-only interface for looking up wired agents:
 ```typescript
-class AgentRouter {
-  resolve(message: IncomingMessage, bindings: Binding[]): string {
-    // Evaluate bindings in priority order (highest specificity first)
-    // 1. Exact peer/channel ID match
-    // 2. Channel-type match (e.g., all Slack DMs)
-    // 3. Account/team-level match
-    // 4. Default agent fallback
-    for (const binding of sortedBindings) {
-      if (matches(message, binding)) return binding.agentId;
-    }
-    return getDefaultAgent();
-  }
+interface AgentRegistryEntry {
+  agentId: string;
+  getStatus(): AgentStatus;
+  dispatch(message: string, sessionId?: string): AsyncGenerator<AgentEvent>;
+}
+
+interface AgentRegistry {
+  get(agentId: string): AgentRegistryEntry | undefined;
+  has(agentId: string): boolean;
+  getAll(): AgentRegistryEntry[];
+  getAvailable(): AgentRegistryEntry[];  // status === READY or RUNNING
 }
 ```
+Concrete implementation in `packages/app/src/agent-registry-impl.ts` via `buildAgentRegistry(agents)`.
 
-Bindings are defined in `config.bindings[]`, each specifying match criteria (`peer`, `channel`, `team`, `account`) and a target `agentId`. Match fields use AND logic (all specified fields must match). First match wins within the same specificity tier.
+**Agent router** (`agent-router.ts`) — wraps static binding resolution with availability checks and per-agent circuit breaking:
+- Scores all bindings for a channel/sender/conversation (same algorithm as `resolveAgent()`).
+- Checks if resolved agent is available (READY/RUNNING) and healthy (circuit closed or half-open).
+- Falls back to alternate bindings if top candidate is unavailable.
+- Per-agent failure tracking: 5 failures in 60s → circuit open, 30s cooldown → half-open.
+- `recordSuccess(agentId)`, `recordFailure(agentId)`, `isAgentHealthy(agentId)`.
 
-**Per-agent isolation** — each agent gets a fully isolated runtime:
-- Workspace: `~/.agentic-os/agents/{agentId}/workspace/`
-- Sessions: `~/.agentic-os/agents/{agentId}/sessions/`
-- Memory: separate SQLite database per agent (episodic store with FTS5 + sqlite-vec).
-- Config overrides: `agents.list[].{tools, models, sandbox, skills}` override global defaults.
+**Agent scheduler** (`agent-scheduler.ts`) — concurrency-limited priority queue:
+- Below concurrency limit → execute immediately.
+- At limit → insert into sorted array by priority (lower number = higher priority), FIFO within same priority.
+- On completion → drain next queued item.
+- Callbacks: `onEvent(task, event)`, `onDone(task)`, `onError(task, error)`.
+- `registerAgent(agentId, dispatchFn)`, `unregisterAgent(agentId)`.
+- `enqueue(task, onEvent?, onDone?, onError?): string` — synchronous, returns task ID.
 
-**Cross-agent communication tools** — two tools, disabled by default, enabled per-agent in config:
+**Binding override wiring** — threads `ResolvedBinding.binding.overrides` through the message path:
+1. `ChannelManager.sendMessage()` serializes `binding.overrides` into `agentMsg.metadata['x-binding-overrides']` as JSON.
+2. `AgentManager.subscribeToInbox()` gained `onBeforeDispatch` and `onAfterDispatch` callbacks.
+3. `wireAgent()` uses `onBeforeDispatch` to extract overrides, recompute tools via `policyEngine.getEffectiveBuiltinTools({ bindingTools: overrides.tools })`, and call `manager.setTools()` with narrowed tools. `onAfterDispatch` restores defaults.
+4. `WiredAgent` interface now exposes `policyEngine: PolicyEngine`.
 
-`agent_spawn` — delegate a task to another agent:
-```typescript
-// The parent creates a sub-session on the child agent
-{
-  name: "agent_spawn",
-  inputSchema: {
-    targetAgent: "string",    // Agent ID to delegate to
-    task: "string",           // Task description
-    context: "string?",       // Optional context to pass
-    timeout: "number?"        // Max seconds to wait (default: 120)
-  }
-}
-```
-Execution: create a temporary session on the target agent, inject the task as a user message, run the agent loop, return the final response to the caller. The child runs in its own context window with a `minimal` system prompt.
+**Cross-agent communication tools** — two tool definitions + handler factories:
 
-`agent_send` — direct message another agent:
-```typescript
-{
-  name: "agent_send",
-  inputSchema: {
-    targetAgent: "string",
-    message: "string",
-    waitForReply: "boolean?",        // Default: true
-    maxExchanges: "number?"          // Max ping-pong turns (default: 5)
-  }
-}
-```
-Execution: publish a message to `agent.{targetId}.inbox` via the gateway. If `waitForReply`, use NATS request/reply with correlation ID. For multi-turn exchanges, loop up to `maxExchanges` turns.
+`agent_spawn` (`riskLevel: 'yellow'`) — input: `{ targetAgent, task, context?, timeout? }`:
+- Looks up target in `AgentRegistry`, validates availability.
+- Calls `entry.dispatch(formattedMessage)` with `[Delegated from {callerAgentId}]` prefix.
+- Collects final `assistant_message` text with configurable timeout.
+- Returns `{ agent, response }` or `{ error }`.
 
-**Scheduling** — the `AgentScheduler` manages concurrent agent execution:
-- Configurable concurrency limit (`config.gateway.maxConcurrentAgents`, default: 5).
-- Ready queue: agents waiting for dispatch, ordered by priority then arrival time.
-- When a RUNNING agent completes or suspends, the scheduler pops the next READY agent.
-- Priority assignment: user-initiated tasks get priority 1 (highest), cross-agent delegations get priority 2, cron/background tasks get priority 3.
+`agent_send` (`riskLevel: 'yellow'`) — input: `{ targetAgent, message, waitForReply?, maxExchanges? }`:
+- Fire-and-forget mode: dispatch async, return `{ sent: true }`.
+- Wait-for-reply mode: dispatch sync, collect response, return `{ agent, reply }`.
 
-**Orchestration patterns via plugins** — ship three built-in orchestration plugins (all optional, composable):
+**Orchestration pattern tools** — higher-level compositions, all optional:
 
-1. **Supervisor plugin**: registers an `orchestrate` tool that accepts a task description and a list of worker agent IDs. The supervisor agent decides how to decompose the task, delegates via `agent_spawn`, and synthesizes results.
-2. **Pipeline plugin**: defines a sequential chain of agents in config. Each agent's output becomes the next agent's input. Implemented as a `pipeline_execute` tool.
-3. **Broadcast plugin**: registers a `broadcast` tool that sends a message to all agents matching a tag, collects responses, and returns the aggregate.
+1. `orchestrate` (supervisor) — decomposes task across workers (parallel via `Promise.allSettled` or sequential `for-of` loop), returns `{ mode, results[] }`.
+2. `pipeline_execute` — sequential chain where each output feeds next input, returns `{ steps[], finalOutput }`. Halts on error with partial results.
+3. `broadcast` — fan-out same message to multiple agents, collect all responses via `Promise.allSettled`, returns `{ responses[] }`.
+
+**Bootstrap integration** (`packages/app/src/bootstrap.ts`):
+1. After wiring all agents, builds `AgentRegistry` via `buildAgentRegistry(agents)`.
+2. Creates `AgentScheduler` with `config.orchestrator.maxConcurrentAgents ?? config.gateway.maxConcurrentAgents`.
+3. Registers each agent's dispatch function with scheduler.
+4. Creates `AgentRouter` with bindings + registry.
+5. For each agent: registers `agent_spawn`, `agent_send`, `orchestrate`, `pipeline_execute`, `broadcast` if policy allows.
+6. Rebuilds effective tools after adding orchestration tools.
+7. Exposes `scheduler`, `router`, and `agentRegistry` on `AppServer`.
+
+### Files created (16)
+
+| File | Purpose |
+|------|---------|
+| `packages/core/src/orchestration.ts` | `TaskPriority`, `ScheduledTask`, `AgentHealthInfo`, `OrchestratorConfig` |
+| `packages/orchestrator/src/agent-registry.ts` | `AgentRegistry` + `AgentRegistryEntry` interfaces |
+| `packages/orchestrator/src/agent-router.ts` | `AgentRouter` with availability + circuit breaking |
+| `packages/orchestrator/src/agent-scheduler.ts` | Concurrency-limited priority queue |
+| `packages/orchestrator/src/tools/agent-spawn-tool.ts` | `agent_spawn` tool definition + handler factory |
+| `packages/orchestrator/src/tools/agent-send-tool.ts` | `agent_send` tool definition + handler factory |
+| `packages/orchestrator/src/tools/index.ts` | Tools barrel export |
+| `packages/orchestrator/src/tools/supervisor-tool.ts` | `orchestrate` tool (parallel/sequential decomposition) |
+| `packages/orchestrator/src/tools/pipeline-tool.ts` | `pipeline_execute` tool (sequential chain) |
+| `packages/orchestrator/src/tools/broadcast-tool.ts` | `broadcast` tool (fan-out/collect) |
+| `packages/app/src/agent-registry-impl.ts` | `buildAgentRegistry()` backed by wired agents |
+| `packages/orchestrator/tests/agent-router.test.ts` | 14 tests |
+| `packages/orchestrator/tests/agent-scheduler.test.ts` | 14 tests |
+| `packages/orchestrator/tests/agent-spawn-tool.test.ts` | 7 tests |
+| `packages/orchestrator/tests/agent-send-tool.test.ts` | 8 tests |
+| `packages/app/tests/binding-overrides.test.ts` | 5 tests |
+
+### Files modified (14)
+
+| File | Change |
+|------|--------|
+| `packages/core/src/config.ts` | Added `orchestrator?: OrchestratorConfig` |
+| `packages/core/src/tools.ts` | Added `'orchestration'` to `ToolSource` |
+| `packages/core/src/index.ts` | Export orchestration types |
+| `packages/core/src/config-validator.ts` | Added `'orchestrator'` to `VALID_TOP_LEVEL_KEYS` |
+| `packages/tools/src/tool-groups.ts` | Added `group:orchestration` |
+| `config/default.json5` | Added orchestrator section |
+| `packages/orchestrator/src/index.ts` | Full barrel export |
+| `packages/channels/src/channel-manager.ts` | Propagate overrides via metadata |
+| `packages/agent-runtime/src/agent-manager.ts` | Added `onBeforeDispatch`/`onAfterDispatch` to `subscribeToInbox` |
+| `packages/app/src/agent-wiring.ts` | Expose `policyEngine`, handle binding overrides |
+| `packages/app/src/bootstrap.ts` | Registry, scheduler, router, orchestration tool registration |
+| `packages/app/package.json` | Added orchestrator dependency |
+| `knip.json` | Updated orchestrator entry |
+| `packages/orchestrator/package.json` | Package metadata |
+
+### Deferred to future phases
+
+- **NATS-based cross-node agent_send** — both tools call `dispatch()` directly in-process. NATS routing for distributed deployments is Phase 8+.
+- **DM/group session policy enforcement** — types exist but enforcement deferred to Phase 7.
+- **Model/sandbox binding overrides consumption** — metadata propagation is wired but only `tools` overrides are consumed. Model and sandbox override consumption requires LLMService and SandboxManager changes, deferred to Phase 7.
 
 ### How to verify
-- Routing: configure two agents bound to different channels. Send messages to each channel; verify correct agent handles each.
-- Isolation: two agents running concurrently don't see each other's workspace files or memory.
-- `agent_spawn`: Agent A spawns a task on Agent B; verify B processes it and A receives the result.
-- `agent_send`: Agent A sends a message to Agent B with `waitForReply: true`; verify the two-turn exchange completes.
-- Scheduling: start 10 tasks with concurrency limit 3; verify only 3 run simultaneously, others queue in order.
-- Supervisor: configure a supervisor with 2 workers, send a multi-part task, verify decomposition and synthesis.
+- `turbo run build` — all 10 packages compile including orchestrator.
+- `turbo run check-types` — no TypeScript errors (9/10 pass; UI has pre-existing error).
+- `turbo run test` — all existing tests pass + 68 new orchestrator tests + 5 new binding override tests + 3 new channel-manager override tests:
+  - Agent router: availability filtering, fallback, circuit breaking (trip, reset, cooldown to half-open), health info, failure window pruning.
+  - Agent scheduler: concurrency limiting, priority ordering (USER > DELEGATION > BACKGROUND), FIFO within same priority, drain-on-complete, register/unregister, callbacks, error handling.
+  - agent_spawn: successful delegation, context in message, unknown agent, unavailable agent, timeout, dispatch error.
+  - agent_send: fire-and-forget, wait-for-reply, unknown/unavailable agent, caller prefix, dispatch error, timeout.
+  - Supervisor: parallel/sequential modes, unavailable/unknown agents, empty subtasks, result shape.
+  - Pipeline: chained output, finalOutput, halt on error, unknown agent, single step, empty steps, unavailable agent.
+  - Broadcast: fan-out/collect, mixed success/failure, empty agents, caller prefix, dispatch errors.
+  - Binding overrides: serialization, round-trip, missing overrides, malformed JSON, metadata propagation.
+- `npx knip` — no unused exports or dependencies.
 
 ---
 
-## Phase 7 — Observability & Security Hardening (Week 24–26)
+## Phase 7 — Observability & Security Hardening (Week 25–27)
 
 ### Goal
 Instrument the entire system for production visibility, and harden security across all layers.
+
+### Prerequisites from Pre-Phase 6 and Phase 6
+
+The following security infrastructure is already in place:
+- **PolicyEngine** has 3 layers: Global → Agent → Binding. Binding-level tool restrictions (allow narrows via intersection, deny stacks additively) are already functional. Session-level policy is the remaining layer to add.
+- **Channel allowlists** enforce peer authorization in `ChannelManager.sendMessage()`.
+- **`ChannelSessionPolicy`** type exists with `enabled`, `defaultAgent`, `maxSessions` fields. DM/group enforcement may have been wired in Phase 6.
+- **Binding-level sandbox overrides** (`BindingOverrides.sandbox`) are typed and available for per-route sandbox customization.
 
 ### What we build
 
@@ -1111,14 +1230,22 @@ Storage: PostgreSQL table with triggers preventing UPDATE and DELETE. Chained ch
    - Environment variable injection prevention: reject commands that set sensitive env vars (`LD_PRELOAD`, `LD_LIBRARY_PATH`, `PATH` overrides).
    - Allowlist mode: optionally restrict agents to a pre-approved set of commands rather than relying solely on the deny-based classifier.
 
-2. **Access control** — implement a Policy Decision Point (PDP):
+2. **Session-level policy layer** — add the 4th layer to the PolicyEngine:
+   - PolicyEngine currently resolves: Global → Agent → Binding (3 layers, implemented in Pre-Phase 6).
+   - Add session-level policy as the 4th layer: Global → Agent → Binding → Session.
+   - Session-type taxonomy: `dm | group | spawn | cron`. Each session type carries default policy constraints (e.g., `spawn` sessions inherit the parent's narrowed scope, `cron` sessions may have restricted tool access).
+   - `PolicyContext` gains `sessionType?: 'dm' | 'group' | 'spawn' | 'cron'` and `sessionTools?: { allow?: string[]; deny?: string[] }`.
+   - Session-level policy follows the same narrowing rules as binding-level: allow intersects, deny stacks.
+
+3. **Access control** — implement a Policy Decision Point (PDP):
    - Agent identity carries: `agentId`, `ownerId`, `roles[]`, `scopes[]`, session JWT.
    - Tool-level permissions: each tool definition includes `requiredScopes[]`. The PDP checks `agent.scopes ⊇ tool.requiredScopes` before execution.
-   - Delegation chain: when Agent A spawns Agent B, B's JWT includes a `delegation_chain` field and B's scopes are constrained to the intersection of A's allowed scopes and B's configured scopes (narrowing only).
+   - Delegation chain: when Agent A spawns Agent B, B's JWT includes a `delegation_chain` field and B's scopes are constrained to the intersection of A's allowed scopes and B's configured scopes (narrowing only). This aligns with the binding-level narrowing pattern already in the PolicyEngine.
 
-3. **Secrets management** — secrets from config are loaded into memory only, never passed as environment variables to sandboxed containers. API keys for LLM providers are resolved at the `LLMService` layer, never exposed to agent code. Sandboxed tools that need credentials use a `secrets_proxy` that injects auth headers server-side.
+4. **Secrets management** — secrets from config are loaded into memory only, never passed as environment variables to sandboxed containers. API keys for LLM providers are resolved at the `LLMService` layer, never exposed to agent code. Sandboxed tools that need credentials use a `secrets_proxy` that injects auth headers server-side. Note: `applyEnvOverrides()` runs after config load — ensure sensitive env vars with the `AGENTIC_OS_` prefix cannot override auth credentials (add a deny-list for `auth__profiles__*__apikey` paths).
 
-4. **Sandbox hardening** — upgrade the Docker sandbox with:
+5. **Sandbox hardening** — upgrade the Docker sandbox with:
+   - Per-binding sandbox overrides (`BindingOverrides.sandbox`) are already typed. Wire them into `SandboxManager` so public-facing bindings can enforce stricter limits than internal ones.
    - Seccomp profile: custom profile extending Docker's default, additionally blocking `ptrace`, `process_vm_readv/writev`, `personality`.
    - No capability escalation: `--security-opt=no-new-privileges`.
    - Filesystem: read-only root, writable workspace only, `/tmp` as noexec tmpfs.
@@ -1130,11 +1257,13 @@ Storage: PostgreSQL table with triggers preventing UPDATE and DELETE. Chained ch
 - Metrics: generate load; verify histograms and counters appear in Prometheus.
 - Audit: execute 10 tool calls; verify 10 events in PostgreSQL with valid chained checksums. Attempt UPDATE; verify trigger rejection.
 - Shell security hardening: attempt obfuscated dangerous command (e.g., base64-encoded `rm -rf /`); verify blocked. Attempt `LD_PRELOAD=/evil.so ls`; verify env injection blocked. Enable allowlist mode; verify unlisted commands are rejected.
+- Session-level policy: create a `spawn` session with narrowed tools. Verify the child session cannot access tools denied at the session level. Verify `cron` sessions respect their default tool restrictions.
 - Delegation: Agent A (scopes: `["bash", "read", "write"]`) spawns Agent B (configured scopes: `["bash", "web"]`). Verify B's effective scopes are `["bash"]` (intersection).
+- Env var security: verify that `AGENTIC_OS_AUTH__PROFILES__0__APIKEY=evil` is blocked by the deny-list.
 
 ---
 
-## Phase 8 — Integration Testing & Developer Experience (Week 27–28)
+## Phase 8 — Integration Testing & Developer Experience (Week 28–29)
 
 ### Goal
 End-to-end integration tests, a CLI for operators, and documentation that makes the system usable.
@@ -1152,10 +1281,13 @@ agentic-os agent list              # List registered agents
 agentic-os agent create <name>     # Scaffold a new agent
 agentic-os plugin install <path>   # Install a plugin
 agentic-os skill add <path>        # Add a skill
-agentic-os config validate         # Validate configuration
+agentic-os config validate         # Validate configuration (applies env overrides, shows effective config)
+agentic-os config show             # Show effective config after env overrides
 agentic-os logs <agentId>          # Tail agent logs
 agentic-os replay <sessionId>      # Replay a session from audit log
 ```
+
+Note: `config validate` should apply `applyEnvOverrides()` after loading and show the effective config (with env overrides applied), so operators can verify what Docker/CI env vars produce.
 
 **Docker Compose stack** — single `docker-compose.yml` that launches:
 - NATS server (with JetStream enabled)
@@ -1164,7 +1296,9 @@ agentic-os replay <sessionId>      # Replay a session from audit log
 - The gateway process
 - OTel Collector → Jaeger + Prometheus + Grafana
 
-One `docker compose up` gets the entire system running.
+One `docker compose up` gets the entire system running. All config values can be overridden via `AGENTIC_OS_*` environment variables in the compose file (e.g., `AGENTIC_OS_GATEWAY__WEBSOCKET__PORT=9999`), following the 12-factor convention. No config file editing required for standard deployments.
+
+Embedding provider auto-detection (`provider: 'auto'`) means the compose stack works out of the box: set `OPENAI_API_KEY` to enable vector search, or leave it unset for BM25-only mode.
 
 **End-to-end test suite:**
 - **Scenario 1 — Single agent conversation**: send 5 messages to an agent via WebSocket, verify coherent responses, verify session JSONL file is correct.
@@ -1174,19 +1308,27 @@ One `docker compose up` gets the entire system running.
 - **Scenario 5 — Plugin hot-reload**: start the system, add a plugin that registers a new tool, verify the tool is usable without restart.
 - **Scenario 6 — Security**: attempt a CRITICAL shell command; verify it's blocked, logged in audit, and an OTel span records the denial.
 - **Scenario 7 — Resilience**: kill the NATS server, verify the circuit breaker activates, restart NATS, verify messages drain and processing resumes.
+- **Scenario 8 — Env var overrides**: start with `AGENTIC_OS_GATEWAY__WEBSOCKET__PORT=9999`; verify the gateway binds to port 9999. Start with `AGENTIC_OS_SESSION__COMPACTION__RESERVETOKENS=5000`; verify compaction uses the overridden value.
+- **Scenario 9 — Binding overrides**: configure a binding with `overrides: { tools: { deny: ["bash"] } }`; send a message matching that binding; verify bash is denied. Send via a different binding; verify bash is allowed.
 
 **Documentation:**
-- `README.md` — quickstart (clone → configure → `docker compose up` → chat).
+- `README.md` — quickstart (clone → configure → `docker compose up` → chat). Note env var overrides for zero-config deployment.
 - `docs/architecture.md` — this HLD distilled into a living doc.
-- `docs/configuration.md` — annotated config reference.
+- `docs/configuration.md` — annotated config reference. Document:
+  - Env var override format (`AGENTIC_OS_` prefix, `__` nesting, type coercion)
+  - Binding overrides (`overrides.model`, `overrides.sandbox`, `overrides.tools`, `overrides.workspace`)
+  - Channel session policies (`allowlist`, `dm`, `group`)
+  - Embedding auto-detection (`provider: 'auto'`)
+  - `reserveTokens` lives in `session.compaction`, not in `agents.defaults`
 - `docs/plugin-guide.md` — how to write and publish plugins.
 - `docs/skill-guide.md` — how to create skills.
 - Per-package `README.md` files with API reference.
 
 ### How to verify
-- All 7 E2E scenarios pass in CI.
+- All 9 E2E scenarios pass in CI.
 - `docker compose up` from a clean checkout reaches healthy state in <60 seconds.
 - CLI commands complete without errors on a running system.
+- `agentic-os config validate` shows effective config with env overrides applied.
 
 ---
 
@@ -1201,8 +1343,9 @@ One `docker compose up` gets the entire system running.
 | 4 | Tool System & Sandbox | 14–17 | 17 weeks |
 | 5 | Plugins & Skills | 18–20 | 20 weeks |
 | 5.5 | Single-Agent E2E Integration | 20–21 | 21 weeks |
+| Pre-6 | Config System Refactoring | 21–22 | 22 weeks |
 | 6 | Multi-Agent Orchestration | 22–24 | 24 weeks |
 | 7 | Observability & Security | 25–27 | 27 weeks |
 | 8 | Integration & DX | 28–29 | **29 weeks** |
 
-Each phase produces a testable, working system. Phase 1-2 gives you a single agent talking through the gateway. Phase 3 adds memory. Phase 4 adds tools. Phase 5 makes it extensible. Phase 5.5 proves the full single-agent path end-to-end. Phase 6 makes it multi-agent. Phase 7 makes it production-grade. Phase 8 makes it usable by others.
+Each phase produces a testable, working system. Phase 1-2 gives you a single agent talking through the gateway. Phase 3 adds memory. Phase 4 adds tools. Phase 5 makes it extensible. Phase 5.5 proves the full single-agent path end-to-end. Pre-Phase 6 refactors config for session-awareness and channel richness. Phase 6 makes it multi-agent. Phase 7 makes it production-grade. Phase 8 makes it usable by others.

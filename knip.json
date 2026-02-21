@@ -10,9 +10,7 @@
     "packages/memory": {},
     "packages/tools": {},
     "packages/plugins": {},
-    "packages/orchestrator": {
-      "ignoreDependencies": ["@agentic-os/core"]
-    },
+    "packages/orchestrator": {},
     "packages/channels": {},
     "packages/ui": {},
     "packages/app": {

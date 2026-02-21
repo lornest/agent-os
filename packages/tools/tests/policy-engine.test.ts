@@ -299,4 +299,83 @@ describe('PolicyEngine', () => {
       expect(engine.isAllowed('read_file', ctx)).toBe(true);
     });
   });
+
+  // ── binding-level overrides ───────────────────────────────────────
+
+  describe('binding-level overrides', () => {
+    it('binding deny stacks with agent deny', () => {
+      const tools: ToolsConfig = { allow: ['*'] };
+      const agents: AgentEntry[] = [
+        { id: 'agent-1', name: 'Agent 1', tools: { deny: ['bash'] } },
+      ];
+      const engine = new PolicyEngine(tools, agents, defaultSandbox, registry);
+      const ctx: PolicyContext = {
+        agentId: 'agent-1',
+        bindingTools: { deny: ['write_file'] },
+      };
+
+      expect(engine.isAllowed('bash', ctx)).toBe(false);       // agent deny
+      expect(engine.isAllowed('write_file', ctx)).toBe(false);  // binding deny
+      expect(engine.isAllowed('read_file', ctx)).toBe(true);    // allowed
+    });
+
+    it('binding allow narrows agent allow (intersection)', () => {
+      const tools: ToolsConfig = { allow: ['*'] };
+      const agents: AgentEntry[] = [
+        { id: 'agent-1', name: 'Agent 1', tools: { allow: ['bash', 'read_file', 'write_file'] } },
+      ];
+      const engine = new PolicyEngine(tools, agents, defaultSandbox, registry);
+      const ctx: PolicyContext = {
+        agentId: 'agent-1',
+        bindingTools: { allow: ['read_file', 'edit_file'] },
+      };
+
+      // Only read_file is in both agent allow and binding allow
+      expect(engine.isAllowed('read_file', ctx)).toBe(true);
+      expect(engine.isAllowed('bash', ctx)).toBe(false);       // not in binding allow
+      expect(engine.isAllowed('write_file', ctx)).toBe(false);  // not in binding allow
+      expect(engine.isAllowed('edit_file', ctx)).toBe(false);   // not in agent allow
+    });
+
+    it('binding allow narrows wildcard to explicit set', () => {
+      const tools: ToolsConfig = { allow: ['*'] };
+      const agents: AgentEntry[] = [{ id: 'agent-1', name: 'Agent 1' }];
+      const engine = new PolicyEngine(tools, agents, defaultSandbox, registry);
+      const ctx: PolicyContext = {
+        agentId: 'agent-1',
+        bindingTools: { allow: ['read_file'] },
+      };
+
+      expect(engine.isAllowed('read_file', ctx)).toBe(true);
+      expect(engine.isAllowed('bash', ctx)).toBe(false);
+      expect(engine.isAllowed('write_file', ctx)).toBe(false);
+    });
+
+    it('binding deny-only: deny added, allow unchanged', () => {
+      const tools: ToolsConfig = { allow: ['*'] };
+      const agents: AgentEntry[] = [{ id: 'agent-1', name: 'Agent 1' }];
+      const engine = new PolicyEngine(tools, agents, defaultSandbox, registry);
+      const ctx: PolicyContext = {
+        agentId: 'agent-1',
+        bindingTools: { deny: ['bash'] },
+      };
+
+      expect(engine.isAllowed('bash', ctx)).toBe(false);
+      expect(engine.isAllowed('read_file', ctx)).toBe(true);
+      expect(engine.isAllowed('write_file', ctx)).toBe(true);
+    });
+
+    it('no binding tools: existing behavior unchanged', () => {
+      const tools: ToolsConfig = { allow: ['*'] };
+      const agents: AgentEntry[] = [
+        { id: 'agent-1', name: 'Agent 1', tools: { deny: ['bash'] } },
+      ];
+      const engine = new PolicyEngine(tools, agents, defaultSandbox, registry);
+      const ctx: PolicyContext = { agentId: 'agent-1' }; // no bindingTools
+
+      expect(engine.isAllowed('bash', ctx)).toBe(false);
+      expect(engine.isAllowed('read_file', ctx)).toBe(true);
+      expect(engine.isAllowed('write_file', ctx)).toBe(true);
+    });
+  });
 });

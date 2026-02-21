@@ -1,10 +1,11 @@
-import type { Binding } from '@agentic-os/core';
+import type { Binding, ResolvedBinding } from '@agentic-os/core';
 
 /**
  * Resolves the best-matching agent for a given channel/sender/conversation
  * by scoring against the configured Binding[] list.
  *
  * Scoring:
+ *  - priority (base score, default 0)
  *  - peer match:    +4
  *  - team match:    +2
  *  - account match: +2
@@ -17,12 +18,12 @@ export function resolveAgent(
   channelType: string,
   senderId: string,
   conversationId?: string,
-): string {
+): ResolvedBinding {
   let bestScore = -1;
-  let bestAgentId: string | undefined;
+  let bestBinding: Binding | undefined;
 
   for (const binding of bindings) {
-    let score = 0;
+    let score = binding.priority ?? 0;
     let matches = true;
 
     if (binding.peer !== undefined) {
@@ -58,18 +59,18 @@ export function resolveAgent(
 
     if (matches && score > bestScore) {
       bestScore = score;
-      bestAgentId = binding.agentId;
+      bestBinding = binding;
     }
   }
 
-  if (bestAgentId) {
-    return bestAgentId;
+  if (bestBinding) {
+    return { agentId: bestBinding.agentId, binding: bestBinding };
   }
 
   // Fallback: find a channel:'default' binding
   const defaultBinding = bindings.find((b) => b.channel === 'default');
   if (defaultBinding) {
-    return defaultBinding.agentId;
+    return { agentId: defaultBinding.agentId, binding: defaultBinding };
   }
 
   throw new Error(

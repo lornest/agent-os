@@ -1,0 +1,109 @@
+// Node B — runs the researcher agent (headless worker)
+// No user-facing UI needed. This node just subscribes to agent.researcher.inbox
+// on NATS and processes requests from other nodes.
+{
+  gateway: {
+    nats: { url: "nats://localhost:4222" },
+    redis: { url: "redis://localhost:6379" },
+    websocket: { port: 18790 },  // different port from Node A
+    maxConcurrentAgents: 5,
+    ui: { enabled: false },
+  },
+
+  agents: {
+    defaults: {
+      model: "pi-mono",
+      contextWindow: 128000,
+      maxTurns: 100,
+    },
+    list: [
+      {
+        id: "researcher",
+        name: "Researcher",
+        description: "Research specialist that investigates topics in depth",
+        persona: "You are a research specialist. When you receive a message from another agent, investigate the topic thoroughly using your available tools. Be detailed and cite your sources. Return a comprehensive answer.",
+        tools: { allow: ["*"] },
+      },
+    ],
+  },
+
+  // No bindings needed — researcher is only reached via agent_send / agent_spawn
+  bindings: [],
+
+  models: {
+    providers: [
+      {
+        id: "pi-mono",
+        type: "pi-mono",
+        models: ["claude-sonnet-4-20250514"],
+        profiles: ["default"],
+      },
+    ],
+    fallbacks: [],
+  },
+
+  auth: {
+    profiles: [
+      { id: "default", provider: "anthropic", apiKeyEnv: "ANTHROPIC_API_KEY" },
+    ],
+  },
+
+  session: {
+    idleTimeoutMs: 1800000,
+    maxHistoryEntries: 1000,
+    compaction: { enabled: true, reserveTokens: 20000 },
+  },
+
+  tools: {
+    allow: ["*"],
+    deny: [],
+    mcpServers: [],
+  },
+
+  sandbox: {
+    mode: "off",
+    scope: "session",
+    docker: {
+      image: "agentic-os-sandbox:latest",
+      memoryLimit: "512m",
+      cpuLimit: "1.0",
+      pidsLimit: 256,
+      networkMode: "none",
+      readOnlyRoot: true,
+      tmpfsSize: "100m",
+      timeout: 30,
+    },
+  },
+
+  plugins: { directories: [], enabled: [], disabled: [] },
+  skills: { directories: [], enabled: [], disabled: [] },
+  channels: { adaptors: {} },
+
+  orchestrator: {
+    spawnTimeoutMs: 120000,
+    sendReplyTimeoutMs: 120000,
+    maxExchanges: 5,
+    remoteDispatchTimeoutMs: 120000,
+  },
+
+  memory: {
+    enabled: true,
+    embedding: {
+      provider: 'auto',
+      dimensions: 1024,
+      model: 'text-embedding-3-large',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      batchSize: 64,
+    },
+    search: {
+      vectorWeight: 0.7,
+      bm25Weight: 0.3,
+      decayHalfLifeDays: 30,
+      mmrLambda: 0.6,
+      defaultMaxResults: 10,
+    },
+    chunking: { targetTokens: 400, overlapTokens: 80, maxChunkTokens: 600 },
+    importanceScoring: { enabled: true, defaultImportance: 0.5 },
+    dailyLog: { enabled: true, directory: 'memory' },
+  },
+}

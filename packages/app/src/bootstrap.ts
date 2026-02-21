@@ -3,12 +3,29 @@ import type {
   LLMProvider,
   Logger,
 } from '@agentic-os/core';
-import { loadConfig } from '@agentic-os/core';
+import { loadConfig, applyEnvOverrides } from '@agentic-os/core';
 import { GatewayServer } from '@agentic-os/gateway';
 import { ChannelManager } from '@agentic-os/channels';
 import type { FileSystem, LLMServiceOptions } from '@agentic-os/agent-runtime';
+import {
+  AgentRouter,
+  AgentScheduler,
+  FederatedAgentRegistry,
+  agentSpawnToolDefinition,
+  createAgentSpawnHandler,
+  agentSendToolDefinition,
+  createAgentSendHandler,
+  supervisorToolDefinition,
+  createSupervisorHandler,
+  pipelineToolDefinition,
+  createPipelineHandler,
+  broadcastToolDefinition,
+  createBroadcastHandler,
+} from '@agentic-os/orchestrator';
+import type { AgentRegistry, RemoteDispatchTransport } from '@agentic-os/orchestrator';
 import { wireAgent } from './agent-wiring.js';
 import type { WiredAgent } from './agent-wiring.js';
+import { buildAgentRegistry } from './agent-registry-impl.js';
 
 export interface BootstrapOptions {
   configPath: string;
@@ -24,6 +41,9 @@ export interface AppServer {
   channelManager: ChannelManager;
   agents: Map<string, WiredAgent>;
   config: AgenticOsConfig;
+  scheduler: AgentScheduler;
+  router: AgentRouter;
+  agentRegistry: AgentRegistry;
   shutdown: () => Promise<void>;
 }
 
@@ -32,7 +52,8 @@ export interface AppServer {
  * 1. Load and validate config
  * 2. Start gateway (NATS + Redis + WebSocket)
  * 3. Wire each configured agent with tools, memory, plugins, skills
- * 4. Return an AppServer handle for lifecycle management
+ * 4. Wire orchestration: registry, scheduler, router, cross-agent tools
+ * 5. Return an AppServer handle for lifecycle management
  */
 export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
   const { configPath, basePath, fs, logger, llmProviders } = options;
@@ -43,7 +64,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
     const errorMessages = result.errors.map((e) => `${e.path}: ${e.message}`).join('; ');
     throw new Error(`Invalid configuration: ${errorMessages}`);
   }
-  const config = result.config;
+  const config = applyEnvOverrides(result.config);
 
   // 2. Start gateway
   const gateway = new GatewayServer(config.gateway);
@@ -64,6 +85,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
       const wired = await wireAgent({
         agentEntry,
         defaults: config.agents.defaults,
+        compaction: config.session.compaction,
         basePath,
         fs,
         llmServiceOptions,
@@ -85,7 +107,106 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
 
   logger.info(`${agents.size} agent(s) wired and ready`);
 
-  // 4. Wire channel adaptors
+  // 4. Wire orchestration
+  const orchestratorConfig = config.orchestrator ?? {};
+  const maxConcurrent = orchestratorConfig.maxConcurrentAgents ?? config.gateway.maxConcurrentAgents;
+
+  // 4a. Build agent registry (federated: local-first with NATS remote fallback)
+  const localRegistry = buildAgentRegistry(agents);
+  const natsClient = gateway.getNatsClient();
+  const natsTransport: RemoteDispatchTransport = {
+    publish: (subject, msg) => natsClient.publish(subject, msg),
+    publishCore: (subject, msg) => natsClient.publishCore(subject, msg),
+    subscribeCoreNats: (subject, handler) => natsClient.subscribeCoreNats(subject, handler),
+    createInbox: () => natsClient.createInbox(),
+  };
+  const agentRegistry = new FederatedAgentRegistry({
+    localRegistry,
+    transport: natsTransport,
+    remoteTimeoutMs: orchestratorConfig.remoteDispatchTimeoutMs,
+  });
+
+  // 4b. Create scheduler
+  const scheduler = new AgentScheduler({ maxConcurrent });
+  for (const [id, wired] of agents) {
+    scheduler.registerAgent(id, (msg: string, sid?: string) => wired.manager.dispatch(msg, sid));
+  }
+
+  // 4c. Create router
+  const router = new AgentRouter({
+    bindings: config.bindings,
+    registry: agentRegistry,
+  });
+
+  // 4d. Register orchestration tools for each agent (if policy allows)
+  for (const [id, wired] of agents) {
+    const ctx = { agentId: id };
+    const spawnOpts = {
+      registry: agentRegistry,
+      callerAgentId: id,
+      defaultTimeoutMs: orchestratorConfig.spawnTimeoutMs,
+    };
+    const sendOpts = {
+      registry: agentRegistry,
+      callerAgentId: id,
+      defaultReplyTimeoutMs: orchestratorConfig.sendReplyTimeoutMs,
+      defaultMaxExchanges: orchestratorConfig.maxExchanges,
+    };
+
+    // Register agent_spawn
+    if (wired.policyEngine.isAllowed('agent_spawn', ctx)) {
+      wired.registry.register(
+        agentSpawnToolDefinition,
+        createAgentSpawnHandler(spawnOpts),
+        'orchestration',
+      );
+    }
+
+    // Register agent_send
+    if (wired.policyEngine.isAllowed('agent_send', ctx)) {
+      wired.registry.register(
+        agentSendToolDefinition,
+        createAgentSendHandler(sendOpts),
+        'orchestration',
+      );
+    }
+
+    // Register orchestration pattern tools
+    if (wired.policyEngine.isAllowed('orchestrate', ctx)) {
+      wired.registry.register(
+        supervisorToolDefinition,
+        createSupervisorHandler(spawnOpts),
+        'orchestration',
+      );
+    }
+
+    if (wired.policyEngine.isAllowed('pipeline_execute', ctx)) {
+      wired.registry.register(
+        pipelineToolDefinition,
+        createPipelineHandler(spawnOpts),
+        'orchestration',
+      );
+    }
+
+    if (wired.policyEngine.isAllowed('broadcast', ctx)) {
+      wired.registry.register(
+        broadcastToolDefinition,
+        createBroadcastHandler(spawnOpts),
+        'orchestration',
+      );
+    }
+
+    // Rebuild effective tools after adding orchestration tools
+    const effectiveTools = wired.policyEngine.getEffectiveBuiltinTools(ctx);
+    const handlerMap = wired.registry.buildHandlerMap(
+      effectiveTools.map((t) => t.name),
+    );
+    wired.manager.setTools(effectiveTools, handlerMap);
+  }
+
+  logger.info('Orchestration tools registered');
+
+  // 5. Wire channel adaptors
   const channelsConfig = config.channels ?? { adaptors: {} };
   const channelManager = new ChannelManager({
     gateway,
@@ -97,7 +218,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
   await channelManager.startAll();
   logger.info('Channel adaptors started');
 
-  // 5. Build shutdown handler
+  // 6. Build shutdown handler
   let shutdownPromise: Promise<void> | null = null;
   let isShutdown = false;
 
@@ -131,5 +252,5 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
     }
   };
 
-  return { gateway, channelManager, agents, config, shutdown };
+  return { gateway, channelManager, agents, config, scheduler, router, agentRegistry, shutdown };
 }
