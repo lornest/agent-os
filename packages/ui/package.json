@@ -16,6 +16,7 @@
     "@assistant-ui/react": "^0.12.11",
     "@assistant-ui/react-markdown": "^0.12.4",
     "@assistant-ui/styles": "^0.3.7",
+    "lucide-react": "^0.575.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

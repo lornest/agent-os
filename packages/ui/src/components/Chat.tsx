@@ -5,28 +5,46 @@ import {
   AttachmentPrimitive,
 } from '@assistant-ui/react';
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
+import { 
+  Plus, 
+  ArrowUp, 
+  Square, 
+  FileText, 
+  X, 
+  Sparkles, 
+  Terminal, 
+  Command,
+  Layout,
+  MessageSquare,
+  History,
+  Info
+} from 'lucide-react';
 import { ToolFallback } from './ToolFallback.js';
 
 const welcomeSuggestions = [
   {
     title: 'Plan a launch',
-    subtitle: 'Create a step-by-step rollout plan for a new feature.',
+    subtitle: 'Create a step-by-step rollout plan.',
     prompt: 'Create a detailed rollout plan for a new feature launch.',
+    icon: <Layout className="w-4 h-4" />,
   },
   {
     title: 'Summarize a doc',
-    subtitle: 'Turn notes into a crisp executive summary.',
-    prompt: 'Summarize this meeting transcript into key decisions and next steps.',
+    subtitle: 'Turn notes into a crisp summary.',
+    prompt: 'Summarize this meeting transcript into key decisions.',
+    icon: <FileText className="w-4 h-4" />,
   },
   {
     title: 'Debug a bug',
-    subtitle: 'Find the root cause and propose a fix.',
-    prompt: 'Help me debug this issue and propose a fix with a test plan.',
+    subtitle: 'Find the root cause and fix.',
+    prompt: 'Help me debug this issue and propose a fix.',
+    icon: <Terminal className="w-4 h-4" />,
   },
   {
     title: 'Draft a response',
-    subtitle: 'Write a clear customer-facing message.',
-    prompt: 'Draft a friendly but direct response to a customer escalation.',
+    subtitle: 'Write a customer-facing message.',
+    prompt: 'Draft a friendly response to a customer escalation.',
+    icon: <MessageSquare className="w-4 h-4" />,
   },
 ];
 
@@ -38,10 +56,6 @@ const followupSuggestions = [
   {
     label: 'Generate test cases',
     prompt: 'Generate test cases for the proposed changes.',
-  },
-  {
-    label: 'Write a PR description',
-    prompt: 'Write a clear PR description for these changes.',
   },
 ];
 
@@ -88,13 +102,13 @@ function MarkdownText() {
 
 function ComposerAttachment() {
   return (
-    <AttachmentPrimitive.Root className="aui-attachment-root aui-attachment-root-composer">
-      <div id="attachment-tile" className="aui-attachment-tile aui-attachment-tile-composer">
-        <div className="chat-attachment-icon">FILE</div>
+    <AttachmentPrimitive.Root className="aui-attachment-root aui-attachment-root-composer chat-attachment-pill">
+      <div className="chat-attachment-content">
+        <FileText className="w-3.5 h-3.5" />
         <AttachmentPrimitive.Name className="chat-attachment-name" />
       </div>
-      <AttachmentPrimitive.Remove className="aui-attachment-tile-remove">
-        <span className="chat-attachment-remove">×</span>
+      <AttachmentPrimitive.Remove className="chat-attachment-remove">
+        <X className="w-3.5 h-3.5" />
       </AttachmentPrimitive.Remove>
     </AttachmentPrimitive.Root>
   );
@@ -103,30 +117,32 @@ function ComposerAttachment() {
 function Composer() {
   return (
     <ComposerPrimitive.Root className="aui-composer-root chat-composer">
-      <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachment }} />
-      <div className="chat-composer-main">
-        <ComposerPrimitive.AddAttachment
-          className="aui-composer-add-attachment chat-composer-add"
-          multiple
-        >
-          Attach
-        </ComposerPrimitive.AddAttachment>
-        <ComposerPrimitive.Input
-          autoFocus
-          placeholder="Ask Agent OS anything..."
-          className="aui-composer-input chat-composer-input"
-        />
-        <div className="chat-composer-actions">
-          <ThreadPrimitive.If running>
-            <ComposerPrimitive.Cancel className="aui-composer-cancel chat-composer-cancel">
-              Stop
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send className="aui-composer-send chat-composer-send">
-              Send
-            </ComposerPrimitive.Send>
-          </ThreadPrimitive.If>
+      <div className="chat-composer-container">
+        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachment }} />
+        <div className="chat-composer-main">
+          <ComposerPrimitive.AddAttachment
+            className="chat-composer-add"
+            multiple
+          >
+            <Plus className="w-5 h-5" />
+          </ComposerPrimitive.AddAttachment>
+          <ComposerPrimitive.Input
+            autoFocus
+            placeholder="Ask Agent OS anything..."
+            className="chat-composer-input"
+          />
+          <div className="chat-composer-actions">
+            <ThreadPrimitive.If running>
+              <ComposerPrimitive.Cancel className="chat-composer-cancel">
+                <Square className="w-4 h-4 fill-current" />
+              </ComposerPrimitive.Cancel>
+            </ThreadPrimitive.If>
+            <ThreadPrimitive.If running={false}>
+              <ComposerPrimitive.Send className="chat-composer-send">
+                <ArrowUp className="w-5 h-5" />
+              </ComposerPrimitive.Send>
+            </ThreadPrimitive.If>
+          </div>
         </div>
       </div>
     </ComposerPrimitive.Root>
@@ -137,84 +153,121 @@ export function Chat() {
   return (
     <ThreadPrimitive.Root
       className="aui-thread-root chat-root dark"
-      style={{ '--thread-max-width': '54rem' } as React.CSSProperties}
+      style={{ '--thread-max-width': '58rem' } as React.CSSProperties}
     >
       <div className="chat-shell">
         <header className="chat-header">
-          <div>
-            <div className="chat-header-title">Agent OS</div>
-            <div className="chat-header-subtitle">LLM Workspace</div>
+          <div className="chat-header-info">
+            <div className="chat-header-brand">
+              <div className="chat-logo">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="chat-header-title">Agent OS</div>
+                <div className="chat-header-subtitle">Intelligence Layer</div>
+              </div>
+            </div>
           </div>
-          <div className="chat-header-status">
-            <ThreadPrimitive.If running>
-              <span className="chat-header-status-dot is-running" />
-              Running
-            </ThreadPrimitive.If>
-            <ThreadPrimitive.If running={false}>
-              <span className="chat-header-status-dot" />
-              Ready
-            </ThreadPrimitive.If>
+          <div className="chat-header-actions">
+            <button className="chat-header-icon-btn">
+              <History className="w-4 h-4" />
+            </button>
+            <button className="chat-header-icon-btn">
+              <Info className="w-4 h-4" />
+            </button>
+            <div className="chat-header-status">
+              <ThreadPrimitive.If running>
+                <span className="chat-header-status-dot is-running" />
+                <span className="chat-header-status-text">Processing</span>
+              </ThreadPrimitive.If>
+              <ThreadPrimitive.If running={false}>
+                <span className="chat-header-status-dot" />
+                <span className="chat-header-status-text">Ready</span>
+              </ThreadPrimitive.If>
+            </div>
           </div>
         </header>
-        <ThreadPrimitive.Viewport className="aui-thread-viewport chat-viewport">
+
+        <ThreadPrimitive.Viewport className="chat-viewport">
           <ThreadPrimitive.Empty>
-            <div className="aui-thread-welcome-root chat-welcome">
-              <div className="chat-welcome-kicker">Welcome</div>
-              <div className="chat-welcome-title">What do you want to build today?</div>
-              <div className="chat-welcome-subtitle">
-                Start with a prompt or pick a quick action to get moving.
+            <div className="chat-welcome">
+              <div className="chat-welcome-content">
+                <div className="chat-welcome-badge">
+                  <Sparkles className="w-3 h-3" />
+                  <span>Next Generation AI</span>
+                </div>
+                <h1 className="chat-welcome-title">
+                  Experience the power of <span className="text-gradient">Agentic Workflows</span>
+                </h1>
+                <p className="chat-welcome-subtitle">
+                  Secure, intelligent, and context-aware assistance for your entire workspace.
+                </p>
               </div>
-              <div className="aui-thread-welcome-suggestions chat-welcome-grid">
+
+              <div className="chat-welcome-grid">
                 {welcomeSuggestions.map((suggestion) => (
-                  <div key={suggestion.title} className="aui-thread-welcome-suggestion-display">
-                    <ThreadPrimitive.Suggestion
-                      prompt={suggestion.prompt}
-                      send
-                      className="aui-thread-welcome-suggestion chat-welcome-card"
-                    >
-                      <span className="aui-thread-welcome-suggestion-text-1">
-                        {suggestion.title}
-                      </span>
-                      <span className="aui-thread-welcome-suggestion-text-2">
-                        {suggestion.subtitle}
-                      </span>
-                    </ThreadPrimitive.Suggestion>
-                  </div>
+                  <ThreadPrimitive.Suggestion
+                    key={suggestion.title}
+                    prompt={suggestion.prompt}
+                    send
+                    className="chat-welcome-card"
+                  >
+                    <div className="chat-welcome-card-icon">
+                      {suggestion.icon}
+                    </div>
+                    <div className="chat-welcome-card-content">
+                      <div className="chat-welcome-card-title">{suggestion.title}</div>
+                      <div className="chat-welcome-card-subtitle">{suggestion.subtitle}</div>
+                    </div>
+                  </ThreadPrimitive.Suggestion>
                 ))}
               </div>
             </div>
           </ThreadPrimitive.Empty>
-          <ThreadPrimitive.Messages
-            components={{
-              UserMessage,
-              AssistantMessage,
-            }}
-          />
-          <ThreadPrimitive.ScrollToBottom className="aui-thread-scroll-to-bottom chat-scroll-button">
-            Jump to latest
+
+          <div className="chat-messages-container">
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage,
+                AssistantMessage,
+              }}
+            />
+          </div>
+          
+          <ThreadPrimitive.ScrollToBottom className="chat-scroll-button">
+            <ArrowUp className="w-4 h-4 rotate-180" />
+            <span>Latest Messages</span>
           </ThreadPrimitive.ScrollToBottom>
         </ThreadPrimitive.Viewport>
-        <ThreadPrimitive.If empty={false}>
-          <div className="aui-thread-followup-suggestions chat-followups">
-            {followupSuggestions.map((suggestion) => (
-              <ThreadPrimitive.Suggestion
-                key={suggestion.label}
-                prompt={suggestion.prompt}
-                send
-                className="aui-thread-followup-suggestion chat-followup-pill"
-              >
-                {suggestion.label}
-              </ThreadPrimitive.Suggestion>
-            ))}
-          </div>
-        </ThreadPrimitive.If>
-        <div className="aui-thread-viewport-footer chat-footer">
+
+        <div className="chat-footer">
+          <ThreadPrimitive.If empty={false}>
+            <div className="chat-followups">
+              {followupSuggestions.map((suggestion) => (
+                <ThreadPrimitive.Suggestion
+                  key={suggestion.label}
+                  prompt={suggestion.prompt}
+                  send
+                  className="chat-followup-pill"
+                >
+                  <Command className="w-3 h-3 mr-1.5 opacity-60" />
+                  {suggestion.label}
+                </ThreadPrimitive.Suggestion>
+              ))}
+            </div>
+          </ThreadPrimitive.If>
           <Composer />
-          <div className="chat-footer-hint">
-            Shift + Enter for a new line • Attach files or paste screenshots
+          <div className="chat-footer-meta">
+            <div className="chat-footer-hint">
+              <span className="kbd">Shift</span> + <span className="kbd">Enter</span> for new line
+            </div>
+            <div className="chat-footer-branding">
+              Powered by Agent OS Core
+            </div>
           </div>
         </div>
       </div>
     </ThreadPrimitive.Root>
   );
 }
+
