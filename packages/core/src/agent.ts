@@ -42,7 +42,7 @@ export interface AgentSnapshot {
 /** Events yielded from the agent loop. */
 export type AgentEvent =
   | { type: 'assistant_message'; content: StreamResponse }
-  | { type: 'tool_result'; name: string; result: unknown }
+  | { type: 'tool_result'; name: string; toolCallId: string; result: unknown }
   | { type: 'tool_blocked'; name: string; reason: string }
   | { type: 'max_turns_reached'; turns: number }
   | { type: 'error'; error: unknown };

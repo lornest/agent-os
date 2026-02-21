@@ -12,6 +12,14 @@ import type { AssembledContext, ToolCallHookResult } from './types.js';
 import { HookBlockError } from './errors.js';
 import { executeToolCall } from './tool-executor.js';
 
+const MAX_TOOL_OUTPUT_CHARS = 50_000;
+
+function truncateToolOutput(output: unknown, maxChars: number): string {
+  const json = JSON.stringify(output);
+  if (json.length <= maxChars) return json;
+  return json.slice(0, maxChars) + `\n[truncated: ${json.length.toLocaleString()} chars, showing first ${maxChars.toLocaleString()}]`;
+}
+
 export async function* agentLoop(
   llm: LLMService,
   context: ConversationContext,
@@ -106,8 +114,9 @@ export async function* agentLoop(
           result,
         });
 
-        yield { type: 'tool_result', name: call.name, result: result.output };
-        context.addToolResult(call.id, JSON.stringify(result.output));
+        const resultJson = truncateToolOutput(result.output, MAX_TOOL_OUTPUT_CHARS);
+        yield { type: 'tool_result', name: call.name, toolCallId: call.id, result: resultJson };
+        context.addToolResult(call.id, resultJson);
       }
 
       await hooks.fire('turn_end', { turn, context });

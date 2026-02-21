@@ -158,6 +158,22 @@ export class NatsClient {
       throw new Error(`No stream found for subject: ${subject}`);
     }
 
+    // Delete any stale durable consumer from a previous run and purge
+    // its old messages so we start fresh.  Old unacked messages reference
+    // WebSocket sessions that no longer exist and would block delivery of
+    // new messages.  Workqueue streams require DeliverPolicy.All, so we
+    // must purge the subject rather than changing the deliver policy.
+    try {
+      await this.jsm.consumers.delete(streamName, consumerName);
+    } catch {
+      // Consumer didn't exist — nothing to clean up.
+    }
+    try {
+      await this.jsm.streams.purge(streamName, { filter: subject });
+    } catch {
+      // Best-effort purge — stream may be empty.
+    }
+
     const consumerOpts: Parameters<JetStreamManager['consumers']['add']>[1] = {
       durable_name: consumerName,
       ack_policy: AckPolicy.Explicit,
@@ -185,6 +201,7 @@ export class NatsClient {
     processMessages();
 
     const js = this.js;
+    const jsm = this.jsm!;
     return {
       subject,
       queueGroup,
@@ -200,6 +217,11 @@ export class NatsClient {
         consumer = await js.consumers.get(streamName, consumerName);
         messages = await consumer.consume();
         processMessages();
+      },
+      destroy: async () => {
+        messages.stop();
+        try { await jsm.consumers.delete(streamName, consumerName); } catch { /* already gone */ }
+        try { await jsm.streams.purge(streamName, { filter: subject }); } catch { /* best effort */ }
       },
     };
   }

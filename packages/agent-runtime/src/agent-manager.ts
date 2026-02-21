@@ -17,12 +17,13 @@ import { ConversationContext } from './conversation-context.js';
 import { InvalidStateTransitionError } from './errors.js';
 import { HookRegistry } from './hook-registry.js';
 import { LLMService } from './llm-service.js';
+import { createContextPrunerHandler } from './context-pruner.js';
 import { registerPromptHandlers } from './prompt-assembler.js';
 import type { PromptMode } from './prompt-types.js';
 import { DEFAULT_BOOTSTRAP_CONFIG } from './prompt-types.js';
 import { SessionStore } from './session-store.js';
 import type { ToolHandlerMap } from './tool-executor.js';
-import type { AgentManagerOptions, FileSystem } from './types.js';
+import type { AgentManagerOptions, AgentState, FileSystem } from './types.js';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   REGISTERED: ['INITIALIZING'],
@@ -111,6 +112,16 @@ export class AgentManager {
       },
     });
 
+    // Register context pruner (runs after prompt enrichment)
+    const prunerDisposable = this.hooks.register(
+      'context_assemble',
+      createContextPrunerHandler({
+        contextWindow: this.defaults.contextWindow,
+      }),
+      500,
+    );
+    this.promptDisposables.push(prunerDisposable);
+
     this.transition('READY' as AgentStatus);
   }
 
@@ -133,7 +144,9 @@ export class AgentManager {
       const llm = this.llm!;
 
       // Create or resume session
-      if (!sessionId) {
+      if (!sessionId && this.currentSessionId) {
+        sessionId = this.currentSessionId;
+      } else if (!sessionId) {
         sessionId = await this.sessionStore.createSession(this.agentId);
       }
       this.currentSessionId = sessionId;
@@ -141,10 +154,18 @@ export class AgentManager {
 
       // Build or restore context
       if (!this.context) {
-        const history = await this.sessionStore.getHistory(
-          this.agentId,
-          sessionId,
-        );
+        let history: Message[] = [];
+        try {
+          history = await this.sessionStore.getHistory(
+            this.agentId,
+            sessionId,
+          );
+        } catch {
+          // Session JSONL is corrupt or missing — create a fresh session
+          sessionId = await this.sessionStore.createSession(this.agentId);
+          this.currentSessionId = sessionId;
+          llm.bindSession(sessionId);
+        }
         this.context = new ConversationContext({
           agentId: this.agentId,
           sessionId,
@@ -186,13 +207,15 @@ export class AgentManager {
         } else if (event.type === 'tool_result') {
           await this.sessionStore.appendEntry(this.agentId, sessionId, {
             role: 'tool',
-            content: JSON.stringify(event.result),
+            content: typeof event.result === 'string' ? event.result : JSON.stringify(event.result),
+            toolCallId: event.toolCallId,
           });
         }
 
         yield event;
       }
 
+      await this.saveState();
       llm.unbindSession();
       this.transition('READY' as AgentStatus);
     } catch (err) {
@@ -243,6 +266,12 @@ export class AgentManager {
   }
 
   async terminate(): Promise<void> {
+    try {
+      if (this.context && this.currentSessionId) {
+        await this.saveState();
+      }
+    } catch { /* best-effort */ }
+
     for (const d of this.promptDisposables) {
       d.dispose();
     }
@@ -267,6 +296,7 @@ export class AgentManager {
   async subscribeToInbox(
     nats: NatsClient,
     onResponse?: (event: AgentEvent, originalMsg: AgentMessage) => void,
+    onDone?: (originalMsg: AgentMessage) => void,
   ): Promise<Subscription> {
     const subject = `agent.${this.agentId}.inbox`;
     const sub = await nats.subscribe(subject, async (msg) => {
@@ -291,6 +321,7 @@ export class AgentManager {
         for await (const event of this.dispatch(userMessage, sessionId)) {
           onResponse?.(event, msg);
         }
+        onDone?.(msg);
       } catch (err) {
         onResponse?.(
           { type: 'error', error: err instanceof Error ? err.message : String(err) },
@@ -331,6 +362,46 @@ export class AgentManager {
 
   getStatus(): AgentStatus {
     return this.status;
+  }
+
+  async restoreLastSession(): Promise<void> {
+    try {
+      const statePath = `${this.basePath}/agents/${this.agentId}/state.json`;
+      if (!(await this.fs.exists(statePath))) return;
+
+      const raw = await this.fs.readFile(statePath);
+      const state = JSON.parse(raw) as AgentState;
+      const history = await this.sessionStore.getHistory(
+        this.agentId,
+        state.currentSessionId,
+      );
+
+      if (history.length > 0) {
+        this.context = new ConversationContext({
+          agentId: this.agentId,
+          sessionId: state.currentSessionId,
+          systemPrompt: this.persona,
+          messages: history,
+        });
+        this.currentSessionId = state.currentSessionId;
+      }
+    } catch {
+      // Corrupt or missing — start fresh
+    }
+  }
+
+  getContext(): ConversationContext | null {
+    return this.context;
+  }
+
+  private async saveState(): Promise<void> {
+    if (!this.currentSessionId) return;
+    const state: AgentState = {
+      currentSessionId: this.currentSessionId,
+      lastActiveAt: now(),
+    };
+    const statePath = `${this.basePath}/agents/${this.agentId}/state.json`;
+    await this.fs.writeFile(statePath, JSON.stringify(state, null, 2));
   }
 
   private transition(to: AgentStatus): void {

@@ -10,6 +10,7 @@ export type {
   ActiveBinding,
   FileSystem,
   AgentManagerOptions,
+  AgentState,
 } from './types.js';
 
 // Errors
@@ -40,6 +41,10 @@ export { SessionStore } from './session-store.js';
 // Context compactor
 export { ContextCompactor } from './context-compactor.js';
 export type { ContextCompactorOptions } from './context-compactor.js';
+
+// Context pruner
+export { createContextPrunerHandler, DEFAULT_MAX_HISTORY_SHARE } from './context-pruner.js';
+export type { ContextPrunerOptions } from './context-pruner.js';
 
 // Agent loop
 export { agentLoop } from './agent-loop.js';

@@ -16,10 +16,8 @@ export class FileWatcher {
    */
   watch(directory: string, callback: (changedPath: string) => void): void {
     try {
-      const watcher = watch(directory, { recursive: true }, (_event, filename) => {
-        if (!filename) return;
-
-        const fullPath = `${directory}/${filename}`;
+      const onEvent = (_event: string, filename?: string | Buffer | null) => {
+        const fullPath = filename ? `${directory}/${filename}` : directory;
 
         // Debounce: clear any pending timer and set a new one
         for (const timer of this.timers) {
@@ -32,6 +30,19 @@ export class FileWatcher {
         }, this.debounceMs);
 
         this.timers.push(timer);
+      };
+
+      let watcher: FSWatcher;
+      try {
+        watcher = watch(directory, { recursive: true }, onEvent);
+      } catch {
+        // Recursive watch isn't supported on all platforms.
+        watcher = watch(directory, {}, onEvent);
+      }
+
+      watcher.on('error', () => {
+        // Avoid unhandled errors (e.g., EMFILE) from failing test runs.
+        watcher.close();
       });
 
       this.watchers.push(watcher);

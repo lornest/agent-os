@@ -98,22 +98,37 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
   logger.info('Channel adaptors started');
 
   // 5. Build shutdown handler
+  let shutdownPromise: Promise<void> | null = null;
+  let isShutdown = false;
+
   const shutdown = async () => {
-    logger.info('Shutting down...');
-    await channelManager.stopAll();
-    logger.info('Channel adaptors stopped');
-    for (const [id, wired] of agents) {
-      try {
-        await wired.cleanup();
-        logger.info(`Agent "${id}" shut down`);
-      } catch (err) {
-        logger.error(
-          `Error shutting down agent "${id}": ${err instanceof Error ? err.message : String(err)}`,
-        );
+    if (isShutdown) return;
+    if (shutdownPromise) return shutdownPromise;
+
+    shutdownPromise = (async () => {
+      logger.info('Shutting down...');
+      await channelManager.stopAll();
+      logger.info('Channel adaptors stopped');
+      for (const [id, wired] of agents) {
+        try {
+          await wired.cleanup();
+          logger.info(`Agent "${id}" shut down`);
+        } catch (err) {
+          logger.error(
+            `Error shutting down agent "${id}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
+      await gateway.stop();
+      logger.info('Gateway stopped');
+    })();
+
+    try {
+      await shutdownPromise;
+    } finally {
+      isShutdown = true;
+      shutdownPromise = null;
     }
-    await gateway.stop();
-    logger.info('Gateway stopped');
   };
 
   return { gateway, channelManager, agents, config, shutdown };

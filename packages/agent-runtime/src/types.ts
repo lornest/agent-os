@@ -85,3 +85,9 @@ export interface AgentManagerOptions {
   basePath: string;
   fs: FileSystem;
 }
+
+/** Persisted state for agent session continuity across restarts. */
+export interface AgentState {
+  currentSessionId: string;
+  lastActiveAt: string;
+}

@@ -30,11 +30,13 @@ const mockConsumersGet = vi.fn().mockResolvedValue({
 });
 
 const mockConsumersAdd = vi.fn().mockResolvedValue({});
+const mockConsumersDelete = vi.fn().mockResolvedValue(undefined);
 
 const mockStreamsAdd = vi.fn().mockResolvedValue({});
 const mockStreamsUpdate = vi.fn().mockResolvedValue({});
 const mockStreamsInfo = vi.fn().mockRejectedValue(new Error('stream not found'));
 const mockStreamsGetMessage = vi.fn().mockResolvedValue(null);
+const mockStreamsPurge = vi.fn().mockResolvedValue({ purged: 0 });
 
 const mockPublish = vi.fn().mockResolvedValue({ seq: 1 });
 
@@ -67,9 +69,11 @@ vi.mock('nats', () => ({
             update: mockStreamsUpdate,
             info: mockStreamsInfo,
             getMessage: mockStreamsGetMessage,
+            purge: mockStreamsPurge,
           },
           consumers: {
             add: mockConsumersAdd,
+            delete: mockConsumersDelete,
           },
         }),
       request: mockRequest,
@@ -167,6 +171,41 @@ describe('NatsClient', () => {
     expect(sub.subject).toBe('agent.test.inbox');
     expect(sub.streamName).toBe('AGENT_TASKS');
     expect(sub.consumerName).toMatch(/^consumer-/);
+    expect(mockConsumersAdd).toHaveBeenCalled();
+  });
+
+  it('deletes stale consumer and purges subject before creating a new one on subscribe', async () => {
+    await client.connect('nats://localhost:4222');
+
+    const handler = vi.fn();
+    await client.subscribe('agent.test.inbox', handler);
+
+    // Should attempt to delete any existing consumer first
+    expect(mockConsumersDelete).toHaveBeenCalledWith(
+      'AGENT_TASKS',
+      expect.stringMatching(/^consumer-/),
+    );
+    // Should purge old messages for this subject
+    expect(mockStreamsPurge).toHaveBeenCalledWith('AGENT_TASKS', {
+      filter: 'agent.test.inbox',
+    });
+    // Delete and purge must happen before add
+    const deleteOrder = mockConsumersDelete.mock.invocationCallOrder[0]!;
+    const purgeOrder = mockStreamsPurge.mock.invocationCallOrder[0]!;
+    const addOrder = mockConsumersAdd.mock.invocationCallOrder[0]!;
+    expect(deleteOrder).toBeLessThan(purgeOrder);
+    expect(purgeOrder).toBeLessThan(addOrder);
+  });
+
+  it('subscribes even when no stale consumer exists to delete', async () => {
+    mockConsumersDelete.mockRejectedValueOnce(new Error('consumer not found'));
+    mockStreamsPurge.mockRejectedValueOnce(new Error('nothing to purge'));
+    await client.connect('nats://localhost:4222');
+
+    const handler = vi.fn();
+    const sub = await client.subscribe('agent.test.inbox', handler);
+    // Should succeed despite delete and purge throwing
+    expect(sub.subject).toBe('agent.test.inbox');
     expect(mockConsumersAdd).toHaveBeenCalled();
   });
 

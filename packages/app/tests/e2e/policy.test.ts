@@ -31,7 +31,7 @@ describe('E2E: Tool policy enforcement', () => {
 
   it('blocks a denied tool and returns a response', async () => {
     const correlationId = harness.client.sendToAgent(
-      'test-agent',
+      harness.agentId,
       'Run echo hello',
     );
 

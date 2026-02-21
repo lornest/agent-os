@@ -17,7 +17,7 @@ describe('E2E: Graceful shutdown', () => {
     await harness.server.shutdown();
 
     // Agent should be terminated
-    const wired = harness.server.agents.get('test-agent')!;
+    const wired = harness.server.agents.get(harness.agentId)!;
     expect(wired.manager.getStatus()).toBe('TERMINATED');
   }, 15_000);
 

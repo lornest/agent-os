@@ -15,13 +15,13 @@ describe('E2E: Conversation round-trip', () => {
   });
 
   it('sends a message and receives a response via WebSocket', async () => {
-    const correlationId = harness.client.sendToAgent('test-agent', 'Hello!');
+    const correlationId = harness.client.sendToAgent(harness.agentId, 'Hello!');
     const response = await harness.client.waitForResponse(correlationId, 10_000);
 
     expect(response).toBeDefined();
     expect(response.type).toBe('task.response');
     expect(response.correlationId).toBe(correlationId);
-    expect(response.source).toBe('agent://test-agent');
+    expect(response.source).toBe(`agent://${harness.agentId}`);
 
     const data = response.data as { text: string };
     expect(data.text).toBe('Hello! I am the test agent.');

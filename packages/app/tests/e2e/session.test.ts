@@ -22,17 +22,17 @@ describe('E2E: Session continuity', () => {
 
   it('sends 3 messages and receives 3 responses in sequence', async () => {
     // Message 1
-    const c1 = harness.client.sendToAgent('test-agent', 'Message 1');
+    const c1 = harness.client.sendToAgent(harness.agentId, 'Message 1');
     const r1 = await harness.client.waitForResponse(c1, 10_000);
     expect((r1.data as { text: string }).text).toBe('Response 1');
 
     // Message 2
-    const c2 = harness.client.sendToAgent('test-agent', 'Message 2');
+    const c2 = harness.client.sendToAgent(harness.agentId, 'Message 2');
     const r2 = await harness.client.waitForResponse(c2, 10_000);
     expect((r2.data as { text: string }).text).toBe('Response 2');
 
     // Message 3
-    const c3 = harness.client.sendToAgent('test-agent', 'Message 3');
+    const c3 = harness.client.sendToAgent(harness.agentId, 'Message 3');
     const r3 = await harness.client.waitForResponse(c3, 10_000);
     expect((r3.data as { text: string }).text).toBe('Response 3');
 

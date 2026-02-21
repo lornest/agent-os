@@ -15,7 +15,17 @@ function now(): string {
   return new Date().toISOString();
 }
 
-const senderId = `user-${generateId().slice(0, 8)}`;
+function getOrCreateSenderId(): string {
+  const key = 'agentic-os:senderId';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `user-${crypto.randomUUID().slice(0, 8)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
+const senderId = getOrCreateSenderId();
 
 export function GatewayRuntimeProvider({
   children,
@@ -24,6 +34,9 @@ export function GatewayRuntimeProvider({
   const [isRunning, setIsRunning] = useState(false);
   const clientRef = useRef<GatewayWsClient | null>(null);
   const pendingRef = useRef<Set<string>>(new Set());
+  const sessionIdRef = useRef<string | null>(
+    localStorage.getItem('agentic-os:sessionId'),
+  );
 
   useEffect(() => {
     const client = new GatewayWsClient();
@@ -32,20 +45,32 @@ export function GatewayRuntimeProvider({
     client.connect((msg: AgentMessage) => {
       const correlationId = msg.correlationId ?? msg.id;
 
-      if (pendingRef.current.has(correlationId)) {
-        const data = msg.data as Record<string, unknown> | undefined;
-        const text =
-          typeof data?.text === 'string' ? data.text : JSON.stringify(data);
+      if (!pendingRef.current.has(correlationId)) return;
 
-        const assistantMessage: ThreadMessageLike = {
-          role: 'assistant',
-          content: [{ type: 'text', text }],
-        };
+      const isDone = msg.type === 'task.done' || msg.type === 'task.error';
 
-        setMessages((prev) => [...prev, assistantMessage]);
+      if (isDone) {
         pendingRef.current.delete(correlationId);
         setIsRunning(false);
+        return;
       }
+
+      const data = msg.data as Record<string, unknown> | undefined;
+
+      if (data?.sessionId && typeof data.sessionId === 'string') {
+        sessionIdRef.current = data.sessionId;
+        localStorage.setItem('agentic-os:sessionId', data.sessionId);
+      }
+
+      const text =
+        typeof data?.text === 'string' ? data.text : JSON.stringify(data);
+
+      const assistantMessage: ThreadMessageLike = {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
     });
 
     return () => {
@@ -77,7 +102,7 @@ export function GatewayRuntimeProvider({
       target: 'agent://assistant',
       time: now(),
       datacontenttype: 'application/json',
-      data: { text },
+      data: { text, sessionId: sessionIdRef.current ?? undefined },
       correlationId,
       metadata: {
         channelType: 'webchat',

@@ -41,14 +41,40 @@ describe('ResponseRouter', () => {
     expect(router.routeResponse('unknown', response)).toBe(false);
   });
 
-  it('removes tracking after successful route', () => {
+  it('keeps tracking after successful route for multi-message support', () => {
     const mockWs = { send: vi.fn().mockReturnValue(true) };
     const router = new ResponseRouter(mockWs as any);
 
     router.trackRequest('corr-2', 'ws-session-2');
     router.routeResponse('corr-2', createTestMessage());
 
+    expect(router.pendingCount).toBe(1);
+  });
+
+  it('routes multiple responses for the same correlationId', () => {
+    const mockWs = { send: vi.fn().mockReturnValue(true) };
+    const router = new ResponseRouter(mockWs as any);
+
+    router.trackRequest('corr-multi', 'ws-session-1');
+
+    const r1 = createTestMessage({ correlationId: 'corr-multi' });
+    const r2 = createTestMessage({ correlationId: 'corr-multi' });
+
+    expect(router.routeResponse('corr-multi', r1)).toBe(true);
+    expect(router.routeResponse('corr-multi', r2)).toBe(true);
+    expect(mockWs.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('completeRequest removes tracking', () => {
+    const mockWs = { send: vi.fn().mockReturnValue(true) };
+    const router = new ResponseRouter(mockWs as any);
+
+    router.trackRequest('corr-done', 'ws-session-1');
+    expect(router.pendingCount).toBe(1);
+
+    router.completeRequest('corr-done');
     expect(router.pendingCount).toBe(0);
+    expect(router.routeResponse('corr-done', createTestMessage())).toBe(false);
   });
 
   it('builds a response message with correct fields', () => {

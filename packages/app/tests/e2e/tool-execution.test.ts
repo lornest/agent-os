@@ -28,7 +28,7 @@ describe('E2E: Tool execution', () => {
     });
 
     // Create a file in the agent's workspace
-    const workspaceDir = path.join(harness.basePath, 'agents', 'test-agent', 'workspace');
+    const workspaceDir = path.join(harness.basePath, 'agents', harness.agentId, 'workspace');
     await fs.mkdir(workspaceDir, { recursive: true });
     await fs.writeFile(path.join(workspaceDir, 'hello.txt'), 'test file content', 'utf-8');
   }, 15_000);
@@ -39,17 +39,22 @@ describe('E2E: Tool execution', () => {
 
   it('executes a tool call and returns the result', async () => {
     const correlationId = harness.client.sendToAgent(
-      'test-agent',
+      harness.agentId,
       'Read the file hello.txt',
     );
 
-    const response = await harness.client.waitForResponse(correlationId, 10_000);
+    const responses = await harness.client.waitForAllResponses(correlationId, 10_000);
 
-    expect(response).toBeDefined();
-    expect(response.type).toBe('task.response');
+    expect(responses.length).toBeGreaterThanOrEqual(2);
 
-    const data = response.data as { text: string };
-    expect(data.text).toContain('test file content');
+    // All should be task.response type
+    for (const r of responses) {
+      expect(r.type).toBe('task.response');
+    }
+
+    // Final response should contain the file content
+    const texts = responses.map((r) => (r.data as { text: string }).text);
+    expect(texts.some((t) => t.includes('test file content'))).toBe(true);
   }, 15_000);
 
   it('called the LLM twice (tool call + final response)', () => {

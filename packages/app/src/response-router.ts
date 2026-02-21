@@ -31,11 +31,14 @@ export class ResponseRouter {
     const wsSessionId = this.pending.get(correlationId);
     if (!wsSessionId) return false;
 
-    const sent = this.ws.send(wsSessionId, response);
-    if (sent) {
-      this.pending.delete(correlationId);
-    }
-    return sent;
+    return this.ws.send(wsSessionId, response);
+  }
+
+  /**
+   * Remove a tracked request after the final response has been sent.
+   */
+  completeRequest(correlationId: string): void {
+    this.pending.delete(correlationId);
   }
 
   /**
@@ -46,6 +49,7 @@ export class ResponseRouter {
     agentId: string,
     text: string,
     toolResults?: Array<{ name: string; result: unknown }>,
+    sessionId?: string,
   ): AgentMessage {
     return {
       id: generateId(),
@@ -58,6 +62,7 @@ export class ResponseRouter {
       data: {
         text,
         toolResults,
+        sessionId,
       },
       correlationId: original.correlationId ?? original.id,
       causationId: original.id,

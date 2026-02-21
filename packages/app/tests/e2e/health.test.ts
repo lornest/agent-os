@@ -18,11 +18,11 @@ describe('E2E: Health check', () => {
 
   it('server has agents wired', () => {
     expect(harness.server.agents.size).toBe(1);
-    expect(harness.server.agents.has('test-agent')).toBe(true);
+    expect(harness.server.agents.has(harness.agentId)).toBe(true);
   });
 
   it('agent is in READY state', () => {
-    const wired = harness.server.agents.get('test-agent')!;
+    const wired = harness.server.agents.get(harness.agentId)!;
     expect(wired.manager.getStatus()).toBe('READY');
   });
 });

@@ -367,12 +367,12 @@ describe('AgentManager', () => {
     await manager.init(createMockLLMService());
 
     const hooks = manager.getHookRegistry();
-    // 4 prompt handlers registered
-    expect(hooks.handlerCount('context_assemble')).toBe(4);
+    // 4 prompt handlers + 1 context pruner
+    expect(hooks.handlerCount('context_assemble')).toBe(5);
 
     await manager.terminate();
 
-    // All prompt handlers should be cleaned up
+    // All handlers should be cleaned up
     expect(hooks.handlerCount('context_assemble')).toBe(0);
   });
 });

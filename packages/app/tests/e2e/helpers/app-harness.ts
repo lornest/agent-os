@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import type { AgentEntry, LLMProvider } from '@agentic-os/core';
 import { bootstrap } from '../../../src/bootstrap.js';
 import type { AppServer } from '../../../src/bootstrap.js';
@@ -37,6 +38,7 @@ export class AppHarness {
   private app: AppServer | null = null;
   private wsClient: WsTestClient | null = null;
   private mockProvider: MockLLMProvider | null = null;
+  private _agentId: string = 'test-agent';
 
   async start(options: AppHarnessOptions = {}): Promise<void> {
     const {
@@ -50,12 +52,24 @@ export class AppHarness {
     this.tempDir = await createTempDir();
     const basePath = path.join(this.tempDir, 'data');
 
-    // Use a random high port to avoid conflicts
-    const port = 18800 + Math.floor(Math.random() * 200);
+    // Use a random high port to avoid conflicts between test suites
+    const port = 18000 + Math.floor(Math.random() * 2000);
+
+    // Generate unique agent ID per suite to isolate NATS subjects
+    const suffix = crypto.randomBytes(4).toString('hex');
+    this._agentId = `test-agent-${suffix}`;
 
     const configPath = await writeTestConfig(this.tempDir, {
       port,
-      agents,
+      agents: agents ?? [
+        {
+          id: this._agentId,
+          name: 'Test Agent',
+          description: 'Agent for E2E tests',
+          persona: 'You are a test assistant. Keep responses short.',
+          tools: { allow: ['*'] },
+        },
+      ],
       toolsDeny,
       memoryEnabled,
     });
@@ -109,6 +123,11 @@ export class AppHarness {
   get mock(): MockLLMProvider {
     if (!this.mockProvider) throw new Error('No mock provider');
     return this.mockProvider;
+  }
+
+  /** The agent ID for this harness instance (unique per suite). */
+  get agentId(): string {
+    return this._agentId;
   }
 
   get basePath(): string {

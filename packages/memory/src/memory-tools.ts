@@ -3,6 +3,8 @@ import type { ToolHandler } from '@agentic-os/agent-runtime';
 import type { EpisodicMemoryStore } from './memory-store.js';
 import type { EmbeddingProvider, SearchResult, SourceType } from './types.js';
 
+const MAX_RESULT_CONTENT_CHARS = 2000;
+
 export const memorySearchTool: ToolDefinition = {
   name: 'memory_search',
   description:
@@ -121,7 +123,9 @@ export function createMemoryGetHandler(
 
     return chunks.map((chunk) => ({
       id: chunk.id,
-      content: chunk.content,
+      content: chunk.content.length > MAX_RESULT_CONTENT_CHARS
+        ? chunk.content.slice(0, MAX_RESULT_CONTENT_CHARS) + '\n[truncated]'
+        : chunk.content,
       importance: chunk.importance,
       sourceType: chunk.sourceType,
       createdAt: chunk.createdAt,
@@ -143,7 +147,9 @@ function formatSearchResults(
 }> {
   return results.map((r) => ({
     id: r.chunk.id,
-    content: r.chunk.content,
+    content: r.chunk.content.length > MAX_RESULT_CONTENT_CHARS
+      ? r.chunk.content.slice(0, MAX_RESULT_CONTENT_CHARS) + '\n[truncated]'
+      : r.chunk.content,
     score: Math.round(r.score * 1000) / 1000,
     importance: r.chunk.importance,
     sourceType: r.chunk.sourceType,

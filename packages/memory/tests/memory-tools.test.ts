@@ -79,6 +79,37 @@ describe('createMemorySearchHandler', () => {
   });
 });
 
+describe('memory search result truncation', () => {
+  it('truncates oversized chunk content in search results', async () => {
+    const longContent = 'x'.repeat(5000);
+    store.upsertChunks([
+      makeChunk({ id: 'big', agentId: 'test-agent', content: `keyword ${longContent}` }),
+    ]);
+
+    const handler = createMemorySearchHandler(store, 'test-agent', new NullEmbeddingProvider());
+    const result = await handler({ query: 'keyword' });
+
+    const results = result as Array<{ id: string; content: string }>;
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.content.length).toBeLessThanOrEqual(2000 + '\n[truncated]'.length);
+    expect(results[0]!.content).toContain('[truncated]');
+  });
+
+  it('does not truncate content within limit', async () => {
+    const shortContent = 'short keyword content';
+    store.upsertChunks([
+      makeChunk({ id: 'small', agentId: 'test-agent', content: shortContent }),
+    ]);
+
+    const handler = createMemorySearchHandler(store, 'test-agent', new NullEmbeddingProvider());
+    const result = await handler({ query: 'keyword' });
+
+    const results = result as Array<{ id: string; content: string }>;
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.content).toBe(shortContent);
+  });
+});
+
 describe('createMemoryGetHandler', () => {
   it('retrieves by ID', async () => {
     store.upsertChunks([
@@ -111,5 +142,20 @@ describe('createMemoryGetHandler', () => {
     const handler = createMemoryGetHandler(store, 'test-agent');
     const result = await handler({ id: 'nonexistent' });
     expect(result).toEqual([]);
+  });
+
+  it('truncates oversized chunk content in get results', async () => {
+    const longContent = 'y'.repeat(5000);
+    store.upsertChunks([
+      makeChunk({ id: 'big-get', agentId: 'test-agent', content: longContent }),
+    ]);
+
+    const handler = createMemoryGetHandler(store, 'test-agent');
+    const result = await handler({ id: 'big-get' });
+
+    const chunks = result as Array<{ id: string; content: string }>;
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.content.length).toBeLessThanOrEqual(2000 + '\n[truncated]'.length);
+    expect(chunks[0]!.content).toContain('[truncated]');
   });
 });

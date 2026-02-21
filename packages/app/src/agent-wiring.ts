@@ -83,6 +83,7 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   const manager = new AgentManager({ agentEntry, defaults, basePath, fs });
   const llmService = new LLMService(llmServiceOptions);
   await manager.init(llmService);
+  await manager.restoreLastSession();
 
   // 2. Build tool registry
   const registry = new ToolRegistry();
@@ -201,11 +202,13 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
     (event: AgentEvent, originalMsg: AgentMessage) => {
       const correlationId = originalMsg.correlationId ?? originalMsg.id;
 
-      if (event.type === 'assistant_message') {
+      if (event.type === 'assistant_message' && event.content.text) {
         const response = ResponseRouter.buildResponseMessage(
           originalMsg,
           agentEntry.id,
           event.content.text,
+          undefined,
+          manager.getCurrentSessionId() ?? undefined,
         );
         gateway.sendResponse(correlationId, response);
       } else if (event.type === 'error') {
@@ -224,6 +227,23 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
         gateway.sendResponse(correlationId, response);
       }
     },
+    (originalMsg: AgentMessage) => {
+      const correlationId = originalMsg.correlationId ?? originalMsg.id;
+      const doneMsg: AgentMessage = {
+        id: generateId(),
+        specversion: '1.0',
+        type: 'task.done',
+        source: `agent://${agentEntry.id}`,
+        target: originalMsg.source,
+        time: now(),
+        datacontenttype: 'application/json',
+        data: {},
+        correlationId,
+        causationId: originalMsg.id,
+      };
+      gateway.sendResponse(correlationId, doneMsg);
+      gateway.completePendingResponse(correlationId);
+    },
   );
 
   gateway.registerSubscription(`agent://${agentEntry.id}`, inboxSub);
@@ -235,6 +255,14 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
     registry,
     memoryStore,
     cleanup: async () => {
+      if (memoryStore) {
+        try {
+          const ctx = manager.getContext();
+          if (ctx) {
+            await hookRegistry.fire('memory_flush', { context: ctx });
+          }
+        } catch { /* best-effort */ }
+      }
       await manager.terminate();
       memoryStore?.close();
     },

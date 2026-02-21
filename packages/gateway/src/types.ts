@@ -34,6 +34,8 @@ export interface Subscription {
   unsubscribe(): void;
   pause(): void;
   resume(): Promise<void>;
+  /** Delete the durable consumer and purge stream messages for this subject. */
+  destroy(): Promise<void>;
 }
 
 /** Handler invoked when a message arrives. */
