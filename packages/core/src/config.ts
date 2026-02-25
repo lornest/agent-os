@@ -62,6 +62,12 @@ export interface GatewayConfig {
   websocket: {
     port: number;
     host?: string;
+    /** Allow unauthenticated WebSocket connections. Defaults to false. */
+    allowAnonymous?: boolean;
+    /** Shared secret for token auth. Clients must send this as Bearer token. */
+    sharedSecret?: string;
+    /** TTL for pending responses / listeners (ms). Defaults to 10 minutes. */
+    responseTtlMs?: number;
   };
   maxConcurrentAgents: number;
   ui?: {

@@ -75,6 +75,8 @@ export class PiMonoProvider implements LLMProvider {
           finishReason: mapStopReason(event.reason),
         };
       } else if (event.type === 'error') {
+        const raw = (event as Record<string, unknown>).error;
+        console.error(`[LLM] pi-ai stream error:`, JSON.stringify(raw, null, 2));
         yield { type: 'done', finishReason: 'error' };
       }
       // Ignore: start, text_start, text_end, thinking_*, toolcall_start, toolcall_delta

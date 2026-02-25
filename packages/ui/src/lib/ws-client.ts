@@ -26,20 +26,24 @@ export class GatewayWsClient {
   private intentionallyClosed = false;
   private onMessage: MessageCallback | null = null;
   private onStatusChange: ((connected: boolean) => void) | null = null;
+  private token: string | undefined;
 
   connect(
     onMessage: MessageCallback,
     onStatusChange?: (connected: boolean) => void,
+    token?: string,
   ): void {
     this.onMessage = onMessage;
     this.onStatusChange = onStatusChange ?? null;
+    this.token = token;
     this.intentionallyClosed = false;
     this.doConnect();
   }
 
   private doConnect(): void {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}/ws`;
+    const base = `${protocol}//${location.host}/ws`;
+    const url = this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
 
     this.ws = new WebSocket(url);
 

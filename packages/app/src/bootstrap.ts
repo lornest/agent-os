@@ -4,8 +4,9 @@ import type {
   Logger,
 } from '@agentic-os/core';
 import { loadConfig, applyEnvOverrides } from '@agentic-os/core';
-import { GatewayServer } from '@agentic-os/gateway';
+import { GatewayServer, GatewayClient } from '@agentic-os/gateway';
 import { ChannelManager } from '@agentic-os/channels';
+import { TelegramAdaptor } from '@agentic-os/channels-telegram';
 import type { FileSystem, LLMServiceOptions } from '@agentic-os/agent-runtime';
 import {
   AgentRouter,
@@ -206,14 +207,23 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
 
   logger.info('Orchestration tools registered');
 
-  // 5. Wire channel adaptors
+  // 5. Wire channel adaptors (connect as a regular WebSocket client)
   const channelsConfig = config.channels ?? { adaptors: {} };
+  const gatewayClient = new GatewayClient({
+    url: `ws://localhost:${config.gateway.websocket.port}/ws`,
+    authToken: config.gateway.websocket.sharedSecret,
+    logger,
+  });
+  await gatewayClient.connect();
+
   const channelManager = new ChannelManager({
-    gateway,
+    gateway: gatewayClient,
     bindings: config.bindings,
     channelsConfig,
     logger,
   });
+
+  channelManager.register(new TelegramAdaptor());
 
   await channelManager.startAll();
   logger.info('Channel adaptors started');
@@ -229,6 +239,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
     shutdownPromise = (async () => {
       logger.info('Shutting down...');
       await channelManager.stopAll();
+      await gatewayClient.disconnect();
       logger.info('Channel adaptors stopped');
       for (const [id, wired] of agents) {
         try {

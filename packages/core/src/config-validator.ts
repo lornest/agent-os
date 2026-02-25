@@ -37,6 +37,11 @@ export interface ConfigValidationResult {
 export function validateConfig(json5String: string): ConfigValidationResult {
   const errors: ConfigValidationError[] = [];
 
+  const isString = (value: unknown): value is string => typeof value === 'string';
+  const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+  const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+  const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
+
   let parsed: unknown;
   try {
     parsed = JSON5.parse(json5String);
@@ -70,6 +75,150 @@ export function validateConfig(json5String: string): ConfigValidationResult {
         path: section,
         message: `Section "${section}" must be an object or array`,
       });
+    }
+  }
+
+  // Shallow type validation for required sections and critical fields
+  const root = parsed as Record<string, unknown>;
+  const gateway = root.gateway;
+  if (isRecord(gateway)) {
+    if (!isRecord(gateway.nats) || !isString(gateway.nats.url)) {
+      errors.push({ path: 'gateway.nats.url', message: 'Expected string URL' });
+    }
+    if (!isRecord(gateway.redis) || !isString(gateway.redis.url)) {
+      errors.push({ path: 'gateway.redis.url', message: 'Expected string URL' });
+    }
+    const websocket = gateway.websocket;
+    if (!isRecord(websocket)) {
+      errors.push({ path: 'gateway.websocket', message: 'Expected object' });
+    } else {
+      const allowAnonymous = websocket.allowAnonymous ?? false;
+      if (!isNumber(websocket.port)) {
+        errors.push({ path: 'gateway.websocket.port', message: 'Expected number' });
+      }
+      if (websocket.allowAnonymous !== undefined && !isBoolean(websocket.allowAnonymous)) {
+        errors.push({ path: 'gateway.websocket.allowAnonymous', message: 'Expected boolean' });
+      }
+      if (websocket.sharedSecret !== undefined && !isString(websocket.sharedSecret)) {
+        errors.push({ path: 'gateway.websocket.sharedSecret', message: 'Expected string' });
+      }
+      if (!allowAnonymous && !isString(websocket.sharedSecret)) {
+        errors.push({
+          path: 'gateway.websocket.sharedSecret',
+          message: 'Required when allowAnonymous is false',
+        });
+      }
+      if (websocket.responseTtlMs !== undefined && !isNumber(websocket.responseTtlMs)) {
+        errors.push({ path: 'gateway.websocket.responseTtlMs', message: 'Expected number' });
+      }
+    }
+    if (!isNumber(gateway.maxConcurrentAgents)) {
+      errors.push({ path: 'gateway.maxConcurrentAgents', message: 'Expected number' });
+    }
+  }
+
+  const agents = root.agents;
+  if (isRecord(agents)) {
+    const defaults = agents.defaults;
+    if (!isRecord(defaults)) {
+      errors.push({ path: 'agents.defaults', message: 'Expected object' });
+    } else {
+      if (!isString(defaults.model)) {
+        errors.push({ path: 'agents.defaults.model', message: 'Expected string' });
+      }
+      if (!isNumber(defaults.contextWindow)) {
+        errors.push({ path: 'agents.defaults.contextWindow', message: 'Expected number' });
+      }
+      if (!isNumber(defaults.maxTurns)) {
+        errors.push({ path: 'agents.defaults.maxTurns', message: 'Expected number' });
+      }
+    }
+    if (!isArray(agents.list)) {
+      errors.push({ path: 'agents.list', message: 'Expected array' });
+    }
+  }
+
+  if (root.bindings !== undefined && !isArray(root.bindings)) {
+    errors.push({ path: 'bindings', message: 'Expected array' });
+  }
+
+  const models = root.models;
+  if (isRecord(models)) {
+    if (!isArray(models.providers)) {
+      errors.push({ path: 'models.providers', message: 'Expected array' });
+    }
+    if (!isArray(models.fallbacks)) {
+      errors.push({ path: 'models.fallbacks', message: 'Expected array' });
+    }
+  }
+
+  const auth = root.auth;
+  if (isRecord(auth)) {
+    if (!isArray(auth.profiles)) {
+      errors.push({ path: 'auth.profiles', message: 'Expected array' });
+    }
+  }
+
+  const session = root.session;
+  if (isRecord(session)) {
+    if (!isNumber(session.idleTimeoutMs)) {
+      errors.push({ path: 'session.idleTimeoutMs', message: 'Expected number' });
+    }
+    if (!isNumber(session.maxHistoryEntries)) {
+      errors.push({ path: 'session.maxHistoryEntries', message: 'Expected number' });
+    }
+    const compaction = session.compaction;
+    if (!isRecord(compaction)) {
+      errors.push({ path: 'session.compaction', message: 'Expected object' });
+    } else {
+      if (!isBoolean(compaction.enabled)) {
+        errors.push({ path: 'session.compaction.enabled', message: 'Expected boolean' });
+      }
+      if (!isNumber(compaction.reserveTokens)) {
+        errors.push({ path: 'session.compaction.reserveTokens', message: 'Expected number' });
+      }
+    }
+  }
+
+  const tools = root.tools;
+  if (isRecord(tools)) {
+    if (tools.allow !== undefined && !isArray(tools.allow)) {
+      errors.push({ path: 'tools.allow', message: 'Expected array' });
+    }
+    if (tools.deny !== undefined && !isArray(tools.deny)) {
+      errors.push({ path: 'tools.deny', message: 'Expected array' });
+    }
+    if (tools.mcpServers !== undefined && !isArray(tools.mcpServers)) {
+      errors.push({ path: 'tools.mcpServers', message: 'Expected array' });
+    }
+  }
+
+  const sandbox = root.sandbox;
+  if (isRecord(sandbox)) {
+    if (!isString(sandbox.mode)) {
+      errors.push({ path: 'sandbox.mode', message: 'Expected string' });
+    }
+    if (!isString(sandbox.scope)) {
+      errors.push({ path: 'sandbox.scope', message: 'Expected string' });
+    }
+    const docker = sandbox.docker;
+    if (!isRecord(docker)) {
+      errors.push({ path: 'sandbox.docker', message: 'Expected object' });
+    } else if (!isString(docker.image)) {
+      errors.push({ path: 'sandbox.docker.image', message: 'Expected string' });
+    }
+  }
+
+  const plugins = root.plugins;
+  if (isRecord(plugins)) {
+    if (!isArray(plugins.directories)) {
+      errors.push({ path: 'plugins.directories', message: 'Expected array' });
+    }
+    if (!isArray(plugins.enabled)) {
+      errors.push({ path: 'plugins.enabled', message: 'Expected array' });
+    }
+    if (!isArray(plugins.disabled)) {
+      errors.push({ path: 'plugins.disabled', message: 'Expected array' });
     }
   }
 

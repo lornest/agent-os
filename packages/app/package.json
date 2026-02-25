@@ -27,6 +27,7 @@
     "@agentic-os/core": "workspace:*",
     "@agentic-os/gateway": "workspace:*",
     "@agentic-os/channels": "workspace:*",
+    "@agentic-os/channels-telegram": "workspace:*",
     "@agentic-os/agent-runtime": "workspace:*",
     "@agentic-os/memory": "workspace:*",
     "@agentic-os/tools": "workspace:*",

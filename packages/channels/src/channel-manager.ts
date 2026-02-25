@@ -4,16 +4,16 @@ import type {
   ChannelAdaptorConfig,
   ChannelAdaptorContext,
   ChannelsConfig,
+  GatewayTransport,
   InboundMessage,
   Logger,
   OutboundMessage,
 } from '@agentic-os/core';
-import type { GatewayServer } from '@agentic-os/gateway';
 import { resolveAgent } from './binding-resolver.js';
 import { buildAgentMessage, buildOutboundMessage } from './message-builder.js';
 
 export interface ChannelManagerOptions {
-  gateway: GatewayServer;
+  gateway: GatewayTransport;
   bindings: Binding[];
   channelsConfig: ChannelsConfig;
   logger: Logger;
@@ -21,7 +21,7 @@ export interface ChannelManagerOptions {
 
 export class ChannelManager {
   private readonly adaptors = new Map<string, ChannelAdaptor>();
-  private readonly gateway: GatewayServer;
+  private readonly gateway: GatewayTransport;
   private readonly bindings: Binding[];
   private readonly channelsConfig: ChannelsConfig;
   private readonly logger: Logger;
@@ -126,14 +126,14 @@ export class ChannelManager {
         // Don't auto-remove: the agent may send multiple responses per turn
         // (streaming chunks, intermediate results, final answer). Cleanup
         // happens when the browser session disconnects.
-        this.gateway.onResponseForCorrelation(correlationId, (response) => {
+        this.gateway.onResponse(correlationId, (response) => {
           const outbound = buildOutboundMessage(response);
           for (const handler of responseHandlers) {
             handler(outbound);
           }
         });
 
-        await this.gateway.injectMessage(agentMsg);
+        await this.gateway.send(agentMsg);
         return correlationId;
       },
 
@@ -142,7 +142,7 @@ export class ChannelManager {
       },
 
       removeResponseListener: (correlationId: string): void => {
-        this.gateway.removeResponseListener(correlationId);
+        this.gateway.removeResponseHandler(correlationId);
       },
 
       resolveAgent: (ct: string, senderId: string, conversationId?: string): string => {

@@ -12,6 +12,7 @@
     "packages/plugins": {},
     "packages/orchestrator": {},
     "packages/channels": {},
+    "packages/channels-telegram": {},
     "packages/ui": {},
     "packages/app": {
       "entry": ["tests/**/*.test.ts"]

@@ -42,36 +42,43 @@ export function GatewayRuntimeProvider({
     const client = new GatewayWsClient();
     clientRef.current = client;
 
-    client.connect((msg: AgentMessage) => {
-      const correlationId = msg.correlationId ?? msg.id;
+    // Pass auth token from URL query string (e.g. ?token=change-me)
+    const urlToken = new URLSearchParams(location.search).get('token') ?? undefined;
 
-      if (!pendingRef.current.has(correlationId)) return;
+    client.connect(
+      (msg: AgentMessage) => {
+        const correlationId = msg.correlationId ?? msg.id;
 
-      const isDone = msg.type === 'task.done' || msg.type === 'task.error';
+        if (!pendingRef.current.has(correlationId)) return;
 
-      if (isDone) {
-        pendingRef.current.delete(correlationId);
-        setIsRunning(false);
-        return;
-      }
+        const isDone = msg.type === 'task.done' || msg.type === 'task.error';
 
-      const data = msg.data as Record<string, unknown> | undefined;
+        if (isDone) {
+          pendingRef.current.delete(correlationId);
+          setIsRunning(false);
+          return;
+        }
 
-      if (data?.sessionId && typeof data.sessionId === 'string') {
-        sessionIdRef.current = data.sessionId;
-        localStorage.setItem('agentic-os:sessionId', data.sessionId);
-      }
+        const data = msg.data as Record<string, unknown> | undefined;
 
-      const text =
-        typeof data?.text === 'string' ? data.text : JSON.stringify(data);
+        if (data?.sessionId && typeof data.sessionId === 'string') {
+          sessionIdRef.current = data.sessionId;
+          localStorage.setItem('agentic-os:sessionId', data.sessionId);
+        }
 
-      const assistantMessage: ThreadMessageLike = {
-        role: 'assistant',
-        content: [{ type: 'text', text }],
-      };
+        const text =
+          typeof data?.text === 'string' ? data.text : JSON.stringify(data);
 
-      setMessages((prev) => [...prev, assistantMessage]);
-    });
+        const assistantMessage: ThreadMessageLike = {
+          role: 'assistant',
+          content: [{ type: 'text', text }],
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+      },
+      undefined,
+      urlToken,
+    );
 
     return () => {
       client.close();

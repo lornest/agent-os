@@ -20,6 +20,8 @@ export interface WebSocketServerOptions {
   allowAnonymous?: boolean;
   authenticate: (token: string) => Promise<string | null>;
   onMessage: WsMessageHandler;
+  /** Called when a WebSocket session disconnects (close or error). */
+  onDisconnect?: (sessionId: string) => void;
 }
 
 export class GatewayWebSocketServer {
@@ -63,7 +65,7 @@ export class GatewayWebSocketServer {
           const resolvedUserId = userId ?? `anon-${generateId().slice(0, 8)}`;
 
           this.wss!.handleUpgrade(req, socket, head, (ws) => {
-            this.handleConnection(ws, resolvedUserId, options.onMessage);
+            this.handleConnection(ws, resolvedUserId, options.onMessage, options.onDisconnect);
           });
         })();
       });
@@ -93,7 +95,7 @@ export class GatewayWebSocketServer {
 
       this.wss.on('connection', (ws, req) => {
         const userId = (req as IncomingMessage & { userId?: string }).userId ?? 'unknown';
-        this.handleConnection(ws, userId, options.onMessage);
+        this.handleConnection(ws, userId, options.onMessage, options.onDisconnect);
       });
 
       await new Promise<void>((resolve) => {
@@ -106,6 +108,7 @@ export class GatewayWebSocketServer {
     ws: WebSocket,
     userId: string,
     onMessage: WsMessageHandler,
+    onDisconnect?: (sessionId: string) => void,
   ): void {
     const sessionId = generateId();
     const session: WsSession = {
@@ -126,10 +129,12 @@ export class GatewayWebSocketServer {
 
     ws.on('close', () => {
       this.sessions.delete(sessionId);
+      onDisconnect?.(sessionId);
     });
 
     ws.on('error', () => {
       this.sessions.delete(sessionId);
+      onDisconnect?.(sessionId);
     });
   }
 

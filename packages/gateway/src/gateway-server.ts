@@ -23,11 +23,8 @@ export class GatewayServer {
   private startTime = Date.now();
 
   /** Maps correlationId → WS session ID for response routing. */
-  private readonly pendingResponses = new Map<string, string>();
-  /** Maps source URI → WS session ID for incoming connections. */
-  private readonly sourceToSession = new Map<string, string>();
-  /** Maps correlationId → callback for programmatic response listeners (channel adaptors). */
-  private readonly responseListeners = new Map<string, (response: AgentMessage) => void>();
+  private readonly pendingResponses = new Map<string, { sessionId: string; createdAt: number }>();
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(private readonly config: GatewayConfig) {
     this.router = new MessageRouter(this.nats);
@@ -55,14 +52,30 @@ export class GatewayServer {
     await this.ws.start({
       httpServer: this.httpServer,
       path: '/ws',
-      allowAnonymous: true,
+      allowAnonymous: this.config.websocket.allowAnonymous ?? false,
       authenticate: async (token: string) => {
-        // Placeholder: accept any non-empty token as userId
-        return token || null;
+        const secret = this.config.websocket.sharedSecret;
+        if (secret) {
+          return token === secret ? 'authenticated' : null;
+        }
+        // No shared secret configured: only allow if anonymous mode is enabled
+        if (this.config.websocket.allowAnonymous) {
+          return token || null;
+        }
+        return null;
       },
       onMessage: (msg: AgentMessage, sessionId?: string) =>
         this.handleIncomingMessage(msg, sessionId),
+      onDisconnect: (sessionId: string) => {
+        for (const [correlationId, entry] of this.pendingResponses) {
+          if (entry.sessionId === sessionId) {
+            this.pendingResponses.delete(correlationId);
+          }
+        }
+      },
     });
+
+    this.startCleanupLoop();
 
     // Listen on the configured port
     await new Promise<void>((resolve) => {
@@ -119,8 +132,7 @@ export class GatewayServer {
     // Track the WS session for response routing
     if (wsSessionId) {
       const correlationId = msg.correlationId ?? msg.id;
-      this.pendingResponses.set(correlationId, wsSessionId);
-      this.sourceToSession.set(msg.source, wsSessionId);
+      this.pendingResponses.set(correlationId, { sessionId: wsSessionId, createdAt: Date.now() });
     }
 
     const laneKey: LaneKey = this.buildLaneKey(msg);
@@ -186,6 +198,10 @@ export class GatewayServer {
 
   async stop(): Promise<void> {
     // Graceful shutdown in reverse order
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
     await this.ws.close();
     if (this.httpServer) {
       await new Promise<void>((resolve, reject) => {
@@ -201,49 +217,14 @@ export class GatewayServer {
   }
 
   /**
-   * Inject a message into the full gateway pipeline (lane queue, idempotency,
-   * circuit breaker, NATS routing) without a WebSocket session.
-   * Used by channel adaptors to feed messages from external platforms.
-   */
-  async injectMessage(msg: AgentMessage): Promise<void> {
-    await this.handleIncomingMessage(msg);
-  }
-
-  /**
-   * Register a callback for responses matching a correlationId.
-   * Channel adaptors use this to receive responses for injected messages.
-   */
-  onResponseForCorrelation(
-    correlationId: string,
-    handler: (response: AgentMessage) => void,
-  ): void {
-    this.responseListeners.set(correlationId, handler);
-  }
-
-  /**
-   * Remove a programmatic response listener.
-   */
-  removeResponseListener(correlationId: string): void {
-    this.responseListeners.delete(correlationId);
-  }
-
-  /**
    * Send a response back to the WS client that originated the request.
-   * Looks up the WS session ID via the correlationId, then falls back
-   * to programmatic response listeners (channel adaptors).
+   * Looks up the WS session ID via the correlationId.
    */
   sendResponse(correlationId: string, response: AgentMessage): boolean {
-    const wsSessionId = this.pendingResponses.get(correlationId);
-    if (wsSessionId) {
-      return this.ws.send(wsSessionId, response);
+    const pending = this.pendingResponses.get(correlationId);
+    if (pending) {
+      return this.ws.send(pending.sessionId, response);
     }
-
-    const listener = this.responseListeners.get(correlationId);
-    if (listener) {
-      listener(response);
-      return true;
-    }
-
     return false;
   }
 
@@ -253,6 +234,22 @@ export class GatewayServer {
    */
   completePendingResponse(correlationId: string): void {
     this.pendingResponses.delete(correlationId);
+  }
+
+  private startCleanupLoop(): void {
+    const ttlMs = this.config.websocket.responseTtlMs ?? 10 * 60 * 1000;
+    if (ttlMs <= 0) return;
+    if (this.cleanupInterval) return;
+
+    this.cleanupInterval = setInterval(() => {
+      const cutoff = Date.now() - ttlMs;
+      for (const [correlationId, entry] of this.pendingResponses) {
+        if (entry.createdAt < cutoff) {
+          this.pendingResponses.delete(correlationId);
+        }
+      }
+    }, Math.min(ttlMs, 60_000));
+    this.cleanupInterval.unref?.();
   }
 
   getNatsClient(): NatsClient {

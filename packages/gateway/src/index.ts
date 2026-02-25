@@ -36,3 +36,7 @@ export { StaticServer } from './static-server.js';
 
 // Gateway server (top-level orchestrator)
 export { GatewayServer } from './gateway-server.js';
+
+// Gateway client (WebSocket client for channel adaptors)
+export { GatewayClient } from './gateway-client.js';
+export type { GatewayClientOptions } from './gateway-client.js';

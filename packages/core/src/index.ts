@@ -61,6 +61,7 @@ export type {
 
 // Channel adaptors
 export type {
+  GatewayTransport,
   ChannelAdaptorStatus,
   ChannelAdaptorInfo,
   InboundMessage,

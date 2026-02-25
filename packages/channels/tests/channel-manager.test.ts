@@ -8,6 +8,7 @@ import type {
   ChannelAdaptorInfo,
   ChannelAdaptorStatus,
   ChannelsConfig,
+  GatewayTransport,
   Logger,
 } from '@agentic-os/core';
 import { ChannelManager } from '../src/channel-manager.js';
@@ -23,19 +24,10 @@ function makeLogger(): Logger {
 
 function makeMockGateway() {
   return {
-    injectMessage: vi.fn().mockResolvedValue(undefined),
-    onResponseForCorrelation: vi.fn(),
-    removeResponseListener: vi.fn(),
-    sendResponse: vi.fn(),
-    start: vi.fn(),
-    stop: vi.fn(),
-    getNatsClient: vi.fn(),
-    getRedisClient: vi.fn(),
-    getWebSocketServer: vi.fn(),
-    registerSubscription: vi.fn(),
-    unregisterSubscription: vi.fn(),
-    completePendingResponse: vi.fn(),
-  };
+    send: vi.fn().mockResolvedValue(undefined),
+    onResponse: vi.fn(),
+    removeResponseHandler: vi.fn(),
+  } satisfies GatewayTransport;
 }
 
 function makeMockAdaptor(
@@ -85,7 +77,7 @@ describe('ChannelManager', () => {
   });
 
   it('registers an adaptor', () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     const adaptor = makeMockAdaptor('webchat');
     manager.register(adaptor);
 
@@ -98,7 +90,7 @@ describe('ChannelManager', () => {
   });
 
   it('rejects duplicate channel type registration', () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     manager.register(makeMockAdaptor('webchat'));
     expect(() => manager.register(makeMockAdaptor('webchat'))).toThrow(
       'already registered',
@@ -106,7 +98,7 @@ describe('ChannelManager', () => {
   });
 
   it('starts enabled adaptors and skips disabled', async () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     const webchat = makeMockAdaptor('webchat');
     const telegram = makeMockAdaptor('telegram');
 
@@ -120,7 +112,7 @@ describe('ChannelManager', () => {
   });
 
   it('logs error when adaptor start fails', async () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     const failing = makeMockAdaptor('webchat', {
       start: vi.fn(async () => {
         throw new Error('port in use');
@@ -136,7 +128,7 @@ describe('ChannelManager', () => {
   });
 
   it('stops all running adaptors', async () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     const adaptor = makeMockAdaptor('webchat');
     manager.register(adaptor);
 
@@ -148,7 +140,7 @@ describe('ChannelManager', () => {
   });
 
   it('getStatuses returns correct statuses', async () => {
-    const manager = new ChannelManager({ gateway: gateway as any, bindings, channelsConfig, logger });
+    const manager = new ChannelManager({ gateway, bindings, channelsConfig, logger });
     const webchat = makeMockAdaptor('webchat');
     const telegram = makeMockAdaptor('telegram');
 
@@ -177,7 +169,7 @@ describe('ChannelManager', () => {
         },
       };
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings,
         channelsConfig: allowlistConfig,
         logger,
@@ -202,7 +194,7 @@ describe('ChannelManager', () => {
         },
       };
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings,
         channelsConfig: allowlistConfig,
         logger,
@@ -221,7 +213,7 @@ describe('ChannelManager', () => {
 
     it('allows all peers when no allowlist is set', async () => {
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings,
         channelsConfig,
         logger,
@@ -246,7 +238,7 @@ describe('ChannelManager', () => {
         { channel: 'default', agentId: 'assistant', overrides },
       ];
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings: bindingsWithOverrides,
         channelsConfig,
         logger,
@@ -258,9 +250,9 @@ describe('ChannelManager', () => {
       const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
       await ctx.sendMessage({ text: 'hello', senderId: 'user1' });
 
-      // Verify gateway.injectMessage was called with metadata containing overrides
-      expect(gateway.injectMessage).toHaveBeenCalledTimes(1);
-      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      // Verify gateway.send was called with metadata containing overrides
+      expect(gateway.send).toHaveBeenCalledTimes(1);
+      const injectedMsg = gateway.send.mock.calls[0][0] as AgentMessage;
       expect(injectedMsg.metadata).toBeDefined();
       expect(injectedMsg.metadata!['x-binding-overrides']).toBeDefined();
 
@@ -270,7 +262,7 @@ describe('ChannelManager', () => {
 
     it('does not include x-binding-overrides when binding has no overrides', async () => {
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings,
         channelsConfig,
         logger,
@@ -282,8 +274,8 @@ describe('ChannelManager', () => {
       const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
       await ctx.sendMessage({ text: 'hello', senderId: 'user1' });
 
-      expect(gateway.injectMessage).toHaveBeenCalledTimes(1);
-      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      expect(gateway.send).toHaveBeenCalledTimes(1);
+      const injectedMsg = gateway.send.mock.calls[0][0] as AgentMessage;
       expect(injectedMsg.metadata!['x-binding-overrides']).toBeUndefined();
     });
 
@@ -293,7 +285,7 @@ describe('ChannelManager', () => {
         { channel: 'default', agentId: 'assistant', overrides },
       ];
       const manager = new ChannelManager({
-        gateway: gateway as any,
+        gateway,
         bindings: bindingsWithOverrides,
         channelsConfig,
         logger,
@@ -305,7 +297,7 @@ describe('ChannelManager', () => {
       const ctx = (adaptor.start as any).mock.calls[0][0] as ChannelAdaptorContext;
       await ctx.sendMessage({ text: 'hello', senderId: 'user1', conversationId: 'conv-1' });
 
-      const injectedMsg = gateway.injectMessage.mock.calls[0][0] as AgentMessage;
+      const injectedMsg = gateway.send.mock.calls[0][0] as AgentMessage;
       // Original metadata should still be present
       expect(injectedMsg.metadata!['channelType']).toBe('webchat');
       expect(injectedMsg.metadata!['senderId']).toBe('user1');

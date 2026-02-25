@@ -1,4 +1,16 @@
+import type { AgentMessage } from './messages.js';
 import type { Logger } from './plugins.js';
+
+/**
+ * Transport abstraction for channel adaptors to communicate with the gateway.
+ * Implemented by GatewayClient (WebSocket) — adaptors are regular clients,
+ * not privileged insiders.
+ */
+export interface GatewayTransport {
+  send(msg: AgentMessage): Promise<void>;
+  onResponse(correlationId: string, handler: (msg: AgentMessage) => void): void;
+  removeResponseHandler(correlationId: string): void;
+}
 
 export type ChannelAdaptorStatus = 'stopped' | 'starting' | 'running' | 'error';
 

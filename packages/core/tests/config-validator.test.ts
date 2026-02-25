@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { validateConfig, loadConfig } from '../src/index.js';
 
 const VALID_CONFIG = `{
-  gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789 }, maxConcurrentAgents: 5 },
+  gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789, allowAnonymous: true }, maxConcurrentAgents: 5 },
   agents: { defaults: { model: "pi-mono", contextWindow: 128000, maxTurns: 100 }, list: [] },
   bindings: [],
   models: { providers: [], fallbacks: [] },
@@ -67,15 +67,15 @@ describe('config validator', () => {
   it('supports JSON5 features (comments, trailing commas)', () => {
     const result = validateConfig(`{
       // This is a comment
-      gateway: {},
-      agents: { defaults: {}, list: [], },  // trailing comma
+      gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789, allowAnonymous: true, }, maxConcurrentAgents: 5, },
+      agents: { defaults: { model: "pi-mono", contextWindow: 128000, maxTurns: 100, }, list: [], },  // trailing comma
       bindings: [],
-      models: {},
-      auth: {},
-      session: {},
+      models: { providers: [], fallbacks: [], },
+      auth: { profiles: [], },
+      session: { idleTimeoutMs: 1800000, maxHistoryEntries: 1000, compaction: { enabled: true, reserveTokens: 20000, }, },
       tools: {},
-      sandbox: {},
-      plugins: {},
+      sandbox: { mode: "off", scope: "session", docker: { image: "sandbox:latest", }, },
+      plugins: { directories: [], enabled: [], disabled: [], },
     }`);
     expect(result.valid).toBe(true);
   });

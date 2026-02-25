@@ -39,7 +39,7 @@ vi.mock('../src/static-server.js', () => ({
 const testConfig: GatewayConfig = {
   nats: { url: 'nats://localhost:4222' },
   redis: { url: 'redis://localhost:6379' },
-  websocket: { port: 18789 },
+  websocket: { port: 18789, allowAnonymous: true },
   maxConcurrentAgents: 10,
 };
 
@@ -116,6 +116,31 @@ describe('GatewayServer', () => {
       }),
     );
     await server.stop();
+  });
+
+  it('passes onDisconnect to WebSocket start', async () => {
+    await server.start();
+    const wsServer = server.getWebSocketServer();
+    expect(wsServer.start).toHaveBeenCalledWith(
+      expect.objectContaining({ onDisconnect: expect.any(Function) }),
+    );
+    await server.stop();
+  });
+
+  it('defaults allowAnonymous to false when omitted', async () => {
+    const secureConfig: GatewayConfig = {
+      nats: { url: 'nats://localhost:4222' },
+      redis: { url: 'redis://localhost:6379' },
+      websocket: { port: 18790 },
+      maxConcurrentAgents: 10,
+    };
+    const secureServer = new GatewayServer(secureConfig);
+    await secureServer.start();
+    const wsServer = secureServer.getWebSocketServer();
+    expect(wsServer.start).toHaveBeenCalledWith(
+      expect.objectContaining({ allowAnonymous: false }),
+    );
+    await secureServer.stop();
   });
 
   it('constructs with UI config', () => {

@@ -197,7 +197,6 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
   }
 
   // 7. Subscribe to NATS inbox with response routing
-  const responseRouter = new ResponseRouter(gateway.getWebSocketServer());
 
   // Save default tools for restoration after binding overrides
   const defaultTools = effectiveTools;
@@ -210,11 +209,12 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
     (event: AgentEvent, originalMsg: AgentMessage) => {
       const correlationId = originalMsg.correlationId ?? originalMsg.id;
 
-      if (event.type === 'assistant_message' && event.content.text) {
+      if (event.type === 'assistant_message' && (event.content.text || event.content.finishReason === 'error')) {
+        const text = event.content.text || '[The assistant encountered an error processing this message.]';
         const response = ResponseRouter.buildResponseMessage(
           originalMsg,
           agentEntry.id,
-          event.content.text,
+          text,
           undefined,
           manager.getCurrentSessionId() ?? undefined,
         );

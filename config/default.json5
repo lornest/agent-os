@@ -11,6 +11,8 @@
     },
     websocket: {
       port: 18789,
+      allowAnonymous: false,
+      sharedSecret: "change-me",
     },
     maxConcurrentAgents: 5,
     ui: { enabled: true, title: "Agent OS" },
@@ -116,7 +118,15 @@
   },
 
   channels: {
-    adaptors: {},
+    adaptors: {
+      telegram: {
+        enabled: false,            // opt-in — requires BOT_TOKEN
+        settings: {
+          botToken: "",            // set via env overlay or direct value
+        },
+        // allowlist: [],          // uncomment to restrict by Telegram user ID
+      },
+    },
   },
 
   orchestrator: {
