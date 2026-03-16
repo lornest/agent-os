@@ -16,6 +16,9 @@ coverage/
 .env.*
 !.env.example
 
+# Node-specific configs (contain secrets)
+config/node-*.json5
+
 # OS files
 .DS_Store
 Thumbs.db
