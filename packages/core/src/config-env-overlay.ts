@@ -52,11 +52,23 @@ export function applyEnvOverrides<T extends object>(
   return config;
 }
 
+/**
+ * Find the actual key in `obj` that matches `segment` case-insensitively.
+ * Returns the existing key if found, otherwise returns the lowercased segment.
+ */
+function resolveKey(obj: Record<string, unknown>, segment: string): string {
+  if (segment in obj) return segment;
+  for (const key of Object.keys(obj)) {
+    if (key.toLowerCase() === segment) return key;
+  }
+  return segment;
+}
+
 function setNested(obj: Record<string, unknown>, path: string[], value: unknown): void {
   let current: Record<string, unknown> = obj;
 
   for (let i = 0; i < path.length - 1; i++) {
-    const segment = path[i]!;
+    const segment = resolveKey(current, path[i]!);
     const next = current[segment];
 
     if (next !== null && typeof next === 'object' && !Array.isArray(next)) {
@@ -69,5 +81,6 @@ function setNested(obj: Record<string, unknown>, path: string[], value: unknown)
     }
   }
 
-  current[path[path.length - 1]!] = value;
+  const finalKey = resolveKey(current, path[path.length - 1]!);
+  current[finalKey] = value;
 }

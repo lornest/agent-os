@@ -85,6 +85,43 @@ describe('applyEnvOverrides', () => {
     expect((config as any).gateway.websocket.host).toBe('localhost');
   });
 
+  it('matches existing camelCase keys case-insensitively', () => {
+    const config = {
+      channels: {
+        adaptors: {
+          telegram: {
+            settings: { botToken: '' },
+          },
+        },
+      },
+    };
+    applyEnvOverrides(config, {
+      CLOTHOS_CHANNELS__ADAPTORS__TELEGRAM__SETTINGS__BOTTOKEN: 'my-token',
+    });
+    expect((config as any).channels.adaptors.telegram.settings.botToken).toBe('my-token');
+    // Should not create a separate lowercase key
+    expect((config as any).channels.adaptors.telegram.settings).not.toHaveProperty('bottoken');
+  });
+
+  it('preserves existing key casing for intermediate objects', () => {
+    const config = {
+      mySection: { nestedKey: { deepValue: 0 } },
+    };
+    applyEnvOverrides(config, {
+      CLOTHOS_MYSECTION__NESTEDKEY__DEEPVALUE: '42',
+    });
+    expect((config as any).mySection.nestedKey.deepValue).toBe(42);
+    expect(config).not.toHaveProperty('mysection');
+  });
+
+  it('falls back to lowercase for new keys', () => {
+    const config: Record<string, unknown> = {};
+    applyEnvOverrides(config, {
+      CLOTHOS_NEWKEY: 'value',
+    });
+    expect(config['newkey']).toBe('value');
+  });
+
   it('returns the same config reference', () => {
     const config = { a: 1 };
     const result = applyEnvOverrides(config, {});
