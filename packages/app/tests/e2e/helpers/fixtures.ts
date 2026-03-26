@@ -106,8 +106,6 @@ export async function writeTestConfig(
     profiles: [{ id: "default", provider: "mock", apiKeyEnv: "MOCK_KEY" }],
   },
   session: {
-    idleTimeoutMs: 1800000,
-    maxHistoryEntries: 1000,
     compaction: { enabled: false, reserveTokens: 20000 },
   },
   tools: {

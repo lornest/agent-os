@@ -1,177 +1,29 @@
-// ClothOS — Master Configuration
-// JSON5 format: comments allowed, trailing commas OK, unquoted keys permitted.
-// Validated against the ClothosConfig schema in @clothos/core.
+// ClothOS — Default Configuration
+// Only specify what differs from defaults. See config/full-example.json5 for all options.
 {
-  gateway: {
-    nats: {
-      url: "nats://localhost:4222",
+  agents: [
+    {
+      id: "assistant",
+      name: "Assistant",
+      description: "General-purpose assistant",
+      persona: "You are a skilled software engineer and general assistant.",
     },
-    redis: {
-      url: "redis://localhost:6379",
+    {
+      id: "researcher",
+      name: "Researcher",
+      description: "Research specialist",
+      persona: "You are a research specialist. Investigate topics thoroughly and return comprehensive answers.",
     },
-    websocket: {
-      port: 18789,
-      allowAnonymous: true,
-      // jwtSecret: optional — auto-generated if omitted
-      // tokenExpiryMs: 3600000, // 1 hour default
-    },
-    maxConcurrentAgents: 5,
-    ui: { enabled: true, title: "Agent OS" },
-  },
-
-  agents: {
-    defaults: {
-      model: "pi-mono",
-      contextWindow: 128000,
-      maxTurns: 100,
-    },
-    list: [
-      {
-        id: "assistant",
-        name: "Assistant",
-        description: "General-purpose assistant that can delegate research to the researcher agent",
-        persona: "You are a skilled software engineer and general assistant. You can explore codebases, write and edit code, run tests, and manage git workflows. You have access to a researcher agent via the agent_send tool. When the user asks a question that would benefit from deep research or analysis, delegate it to the researcher by calling agent_send with targetAgent: 'researcher' and waitForReply: true. Synthesize the researcher's reply into your final answer.",
-        tools: { allow: ["*"] },
-      },
-      {
-        id: "researcher",
-        name: "Researcher",
-        description: "Research specialist that investigates topics in depth",
-        persona: "You are a research specialist. When you receive a message from another agent, investigate the topic thoroughly using your available tools. Be detailed and cite your sources. Return a comprehensive answer.",
-        tools: { allow: ["*"] },
-      },
-    ],
-  },
+  ],
 
   bindings: [
     { channel: "default", agentId: "assistant" },
   ],
 
-  models: {
-    providers: [
-      {
-        id: "pi-mono",
-        type: "pi-mono",
-        models: ["claude-sonnet-4-20250514"],
-        profiles: ["default"],
-      },
-    ],
-    fallbacks: [],
-  },
-
-  auth: {
-    profiles: [
-      {
-        id: "default",
-        provider: "anthropic",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-      },
-    ],
-  },
-
-  session: {
-    idleTimeoutMs: 1800000, // 30 minutes
-    maxHistoryEntries: 1000,
-    compaction: {
-      enabled: true,
-      reserveTokens: 20000,
-    },
-  },
-
-  tools: {
-    allow: ["*"],
-    deny: [],
-    mcpServers: [
-      // {
-      //   name: "example",
-      //   transport: "stdio",
-      //   command: "npx",
-      //   args: ["-y", "@example/mcp-server"],
-      // },
-    ],
-  },
-
-  sandbox: {
-    mode: "off",
-    scope: "session",
-    docker: {
-      image: "clothos-sandbox:latest",
-      memoryLimit: "512m",
-      cpuLimit: "1.0",
-      pidsLimit: 256,
-      networkMode: "none",
-      readOnlyRoot: true,
-      tmpfsSize: "100m",
-      timeout: 30,
-    },
-  },
-
-  plugins: {
-    directories: [],
-    enabled: [],
-    disabled: [],
-  },
-
-  skills: {
-    directories: [],
-    enabled: [],
-    disabled: [],
-  },
-
-  channels: {
-    adaptors: {
-      telegram: {
-        enabled: false,            // opt-in — requires BOT_TOKEN
-        settings: {
-          botToken: "",            // set via env overlay or direct value
-        },
-        // allowlist: [],          // uncomment to restrict by Telegram user ID
-      },
-      whatsapp: {
-        enabled: false,            // opt-in — requires QR scan on first run
-        settings: {
-          authDir: "whatsapp-auth", // relative to basePath
-        },
-        // allowlist: [],          // uncomment to restrict by WhatsApp JID
-      },
-    },
-  },
-
-  orchestrator: {
-    // maxConcurrentAgents: 5,   // falls back to gateway.maxConcurrentAgents
-    spawnTimeoutMs: 120000,       // 2 minutes
-    sendReplyTimeoutMs: 120000,   // 2 minutes
-    maxExchanges: 5,
-  },
-
-  memory: {
-    enabled: true,
-    embedding: {
-      provider: 'auto',             // 'auto' | 'openai' | 'none'
-      dimensions: 1024,
-      model: 'text-embedding-3-large',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      batchSize: 64,
-    },
-    search: {
-      vectorWeight: 0.7,
-      bm25Weight: 0.3,
-      decayHalfLifeDays: 30,
-      mmrLambda: 0.6,
-      defaultMaxResults: 10,
-    },
-    chunking: {
-      targetTokens: 400,
-      overlapTokens: 80,
-      maxChunkTokens: 600,
-    },
-    importanceScoring: {
-      enabled: true,
-      defaultImportance: 0.5,
-    },
-    dailyLog: {
-      enabled: true,
-      directory: 'memory',
-    },
-  },
+  // LLM provider — defaults to Anthropic with claude-sonnet-4-6
+  // Uncomment to use a different provider:
+  // llm: {
+  //   provider: "openrouter",
+  //   model: "anthropic/claude-sonnet-4.6",
+  // },
 }

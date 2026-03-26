@@ -104,9 +104,19 @@ export type {
   OrchestratorConfig,
 } from './orchestration.js';
 
+// User-facing config
+export type { UserConfig, LlmConfig } from './user-config.js';
+
+// Config defaults
+export { CONFIG_DEFAULTS, PROVIDER_API_KEY_MAP } from './config-defaults.js';
+
+// Config transform
+export { resolveConfig, isUserConfig } from './config-transform.js';
+
 // Configuration validator
 export {
   validateConfig,
+  validateUserConfig,
   loadConfig,
 } from './config-validator.js';
 export type {
@@ -118,4 +128,5 @@ export type {
 export { applyEnvOverrides } from './config-env-overlay.js';
 
 // Utilities
-export { generateId, now, isRecord } from './utils.js';
+export { generateId, now, isRecord, deepMerge } from './utils.js';
+export type { DeepPartial } from './utils.js';

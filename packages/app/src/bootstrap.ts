@@ -6,7 +6,7 @@ import type {
   LLMProvider,
   Logger,
 } from '@clothos/core';
-import { loadConfig, applyEnvOverrides } from '@clothos/core';
+// loadConfig and applyEnvOverrides are called by main.ts before bootstrap
 import { GatewayServer, GatewayClient } from '@clothos/gateway';
 import { ChannelManager } from '@clothos/channels';
 import { TelegramAdaptor } from '@clothos/channels-telegram';
@@ -33,7 +33,8 @@ import type { WiredAgent } from './agent-wiring.js';
 import { buildAgentRegistry } from './agent-registry-impl.js';
 
 export interface BootstrapOptions {
-  configPath: string;
+  /** Fully-resolved configuration (loaded and validated by the caller). */
+  config: ClothosConfig;
   basePath: string;
   fs: FileSystem;
   logger: Logger;
@@ -61,15 +62,7 @@ export interface AppServer {
  * 5. Return an AppServer handle for lifecycle management
  */
 export async function bootstrap(options: BootstrapOptions): Promise<AppServer> {
-  const { configPath, basePath, fs, logger, llmProviders } = options;
-
-  // 1. Load config
-  const result = loadConfig(configPath);
-  if (!result.valid || !result.config) {
-    const errorMessages = result.errors.map((e) => `${e.path}: ${e.message}`).join('; ');
-    throw new Error(`Invalid configuration: ${errorMessages}`);
-  }
-  const config = applyEnvOverrides(result.config);
+  const { config, basePath, fs, logger, llmProviders } = options;
 
   // 2. Start gateway
   const gateway = new GatewayServer(config.gateway);

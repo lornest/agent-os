@@ -150,8 +150,6 @@ export interface AuthProfile {
 }
 
 export interface SessionConfig {
-  idleTimeoutMs: number;
-  maxHistoryEntries: number;
   compaction: {
     enabled: boolean;
     reserveTokens: number;

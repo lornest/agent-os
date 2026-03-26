@@ -19,3 +19,35 @@ export function now(): string {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/** Makes all properties (and nested properties) optional. */
+export type DeepPartial<T> = T extends object
+  ? { [K in keyof T]?: DeepPartial<T[K]> }
+  : T;
+
+/**
+ * Deep-merge source onto target. Arrays replace (don't concatenate).
+ * Returns a new object — does not mutate inputs.
+ *
+ * The source can be a DeepPartial<T> — only specified fields override.
+ */
+export function deepMerge<T extends object>(target: T, source: unknown): T {
+  if (!isRecord(source)) return target;
+
+  const result = { ...target } as Record<string, unknown>;
+
+  for (const key of Object.keys(source)) {
+    const sourceVal = (source as Record<string, unknown>)[key];
+    const targetVal = result[key];
+
+    if (sourceVal === undefined) continue;
+
+    if (isRecord(sourceVal) && isRecord(targetVal)) {
+      result[key] = deepMerge(targetVal as Record<string, unknown>, sourceVal);
+    } else {
+      result[key] = sourceVal;
+    }
+  }
+
+  return result as T;
+}

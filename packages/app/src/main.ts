@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { FileSystem } from '@clothos/agent-runtime';
 import type { Logger } from '@clothos/core';
+import { loadConfig, applyEnvOverrides } from '@clothos/core';
 import { PiMonoProvider, getModel } from '@clothos/agent-runtime';
 import { bootstrap } from './bootstrap.js';
 
@@ -51,15 +52,29 @@ async function main(): Promise<void> {
   const logger = createLogger();
   const nodeFs = createNodeFs();
 
-  // Set up LLM provider
-  const provider = process.env['CLOTHOS_PROVIDER'] ?? 'anthropic';
-  const modelId = process.env['CLOTHOS_MODEL'] ?? 'claude-sonnet-4-20250514';
+  // 1. Load and validate config (supports both sparse UserConfig and legacy full format)
+  const result = loadConfig(configPath);
+  if (!result.valid || !result.config) {
+    const errorMessages = result.errors.map((e) => `${e.path}: ${e.message}`).join('; ');
+    throw new Error(`Invalid configuration: ${errorMessages}`);
+  }
+  // Apply env overlays for legacy configs (UserConfig overlays are applied during loadConfig)
+  const config = applyEnvOverrides(result.config);
 
-  const model = getModel(provider as Parameters<typeof getModel>[0], modelId as Parameters<typeof getModel>[1]);
+  // 2. Set up LLM provider from resolved config
+  // CLOTHOS_PROVIDER and CLOTHOS_MODEL env vars override config for backward compatibility
+  const providerName = process.env['CLOTHOS_PROVIDER']
+    ?? config.auth.profiles[0]?.provider
+    ?? 'anthropic';
+  const modelId = process.env['CLOTHOS_MODEL']
+    ?? config.models.providers[0]?.models[0]
+    ?? 'claude-sonnet-4-6';
+
+  const model = getModel(providerName as Parameters<typeof getModel>[0], modelId as Parameters<typeof getModel>[1]);
   const llmProvider = new PiMonoProvider({ model, id: 'pi-mono' });
 
   const app = await bootstrap({
-    configPath,
+    config,
     basePath,
     fs: nodeFs,
     logger,
@@ -75,7 +90,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', handleShutdown);
   process.on('SIGTERM', handleShutdown);
 
-  logger.info(`ClothOS running — WebSocket on port ${app.config.gateway.websocket.port}`);
+  logger.info(`ClothOS running — WebSocket on port ${config.gateway.websocket.port}`);
 }
 
 main().catch((err) => {
