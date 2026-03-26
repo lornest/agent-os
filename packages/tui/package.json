@@ -1,0 +1,42 @@
+{
+  "name": "@clothos/tui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "clothos-tui": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint not yet configured'",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@clothos/core": "workspace:*",
+    "@clothos/gateway": "workspace:*",
+    "@inkjs/ui": "^2.0.0",
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@clothos/typescript-config": "workspace:*",
+    "@types/node": "^22.19.11",
+    "@types/react": "^18.3.23",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
