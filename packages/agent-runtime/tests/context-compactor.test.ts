@@ -25,7 +25,7 @@ function createMockLLMService(tokenCount: number, summaryText = 'Summary of conv
     models: { providers: [], fallbacks: [] },
     auth: { profiles: [] },
   });
-  service.bindSession('test');
+  service.bindSessionSync('test');
   return service;
 }
 
@@ -55,7 +55,7 @@ function createCapturingLLMService(tokenCount: number, summaryText = 'Summary') 
     models: { providers: [], fallbacks: [] },
     auth: { profiles: [] },
   });
-  service.bindSession('test');
+  service.bindSessionSync('test');
   return { service, capturedMessages };
 }
 

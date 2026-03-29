@@ -212,4 +212,96 @@ describe('UserConfig (sparse format)', () => {
     expect(result.config).toBeDefined();
     expect(result.config!.agents.list).toHaveLength(0);
   });
+
+  it('accepts llm with multi-provider config', () => {
+    const result = validateConfig(`{
+      agents: [{ id: "a", name: "A" }],
+      llm: {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        providers: [
+          { id: "openai-fallback", provider: "openai", model: "gpt-4o" }
+        ],
+        fallbacks: ["openai-fallback"]
+      }
+    }`);
+    expect(result.valid).toBe(true);
+    expect(result.config!.models.providers).toHaveLength(2);
+    expect(result.config!.models.fallbacks).toEqual(['openai-fallback']);
+  });
+
+  it('rejects llm.providers entries without required fields', () => {
+    const result = validateConfig(`{
+      agents: [{ id: "a", name: "A" }],
+      llm: {
+        providers: [
+          { provider: "openai", model: "gpt-4o" }
+        ]
+      }
+    }`);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.path === 'llm.providers[0].id')).toBe(true);
+  });
+
+  it('rejects duplicate provider IDs in llm.providers', () => {
+    const result = validateConfig(`{
+      agents: [{ id: "a", name: "A" }],
+      llm: {
+        providers: [
+          { id: "dup", provider: "openai", model: "gpt-4o" },
+          { id: "dup", provider: "anthropic", model: "claude-sonnet-4-6" }
+        ]
+      }
+    }`);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.message.includes('Duplicate provider ID'))).toBe(true);
+  });
+
+  it('rejects llm.fallbacks referencing unknown provider IDs', () => {
+    const result = validateConfig(`{
+      agents: [{ id: "a", name: "A" }],
+      llm: {
+        providers: [
+          { id: "openai-fallback", provider: "openai", model: "gpt-4o" }
+        ],
+        fallbacks: ["nonexistent-provider"]
+      }
+    }`);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.message.includes('Unknown provider ID'))).toBe(true);
+  });
+});
+
+describe('Legacy config referential integrity', () => {
+  it('rejects fallbacks referencing unknown provider IDs', () => {
+    const result = validateConfig(`{
+      gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789, allowAnonymous: true }, maxConcurrentAgents: 5 },
+      agents: { defaults: { model: "pi-mono", contextWindow: 128000, maxTurns: 100 }, list: [] },
+      bindings: [],
+      models: { providers: [{ id: "p1", type: "pi-mono", models: ["m1"], profiles: ["default"] }], fallbacks: ["nonexistent"] },
+      auth: { profiles: [{ id: "default", provider: "anthropic" }] },
+      session: { compaction: { enabled: true, reserveTokens: 20000 } },
+      tools: {},
+      sandbox: { mode: "off", scope: "session", docker: { image: "sandbox:latest" } },
+      plugins: { directories: [], enabled: [], disabled: [] },
+    }`);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.message.includes('not found in models.providers'))).toBe(true);
+  });
+
+  it('rejects provider profile references not in auth.profiles', () => {
+    const result = validateConfig(`{
+      gateway: { nats: { url: "nats://localhost:4222" }, redis: { url: "redis://localhost:6379" }, websocket: { port: 18789, allowAnonymous: true }, maxConcurrentAgents: 5 },
+      agents: { defaults: { model: "pi-mono", contextWindow: 128000, maxTurns: 100 }, list: [] },
+      bindings: [],
+      models: { providers: [{ id: "p1", type: "pi-mono", models: ["m1"], profiles: ["ghost-profile"] }], fallbacks: [] },
+      auth: { profiles: [{ id: "default", provider: "anthropic" }] },
+      session: { compaction: { enabled: true, reserveTokens: 20000 } },
+      tools: {},
+      sandbox: { mode: "off", scope: "session", docker: { image: "sandbox:latest" } },
+      plugins: { directories: [], enabled: [], disabled: [] },
+    }`);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.message.includes('not found in auth.profiles'))).toBe(true);
+  });
 });

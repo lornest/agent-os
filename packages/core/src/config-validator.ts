@@ -90,6 +90,53 @@ export function validateUserConfig(parsed: Record<string, unknown>): ConfigValid
       if (llm['model'] !== undefined && !isString(llm['model'])) {
         errors.push({ path: 'llm.model', message: 'Expected string' });
       }
+
+      // Validate additional providers
+      const providers = llm['providers'];
+      if (providers !== undefined) {
+        if (!isArray(providers)) {
+          errors.push({ path: 'llm.providers', message: 'Expected array' });
+        } else {
+          const seenIds = new Set<string>();
+          for (let i = 0; i < providers.length; i++) {
+            const entry = providers[i];
+            if (!isRecord(entry)) {
+              errors.push({ path: `llm.providers[${i}]`, message: 'Expected object' });
+              continue;
+            }
+            if (!isString(entry['id']) || (entry['id'] as string).trim() === '') {
+              errors.push({ path: `llm.providers[${i}].id`, message: 'Required non-empty string' });
+            } else if (seenIds.has(entry['id'] as string)) {
+              errors.push({ path: `llm.providers[${i}].id`, message: `Duplicate provider ID: "${entry['id']}"` });
+            } else {
+              seenIds.add(entry['id'] as string);
+            }
+            if (!isString(entry['provider']) || (entry['provider'] as string).trim() === '') {
+              errors.push({ path: `llm.providers[${i}].provider`, message: 'Required non-empty string' });
+            }
+            if (!isString(entry['model']) || (entry['model'] as string).trim() === '') {
+              errors.push({ path: `llm.providers[${i}].model`, message: 'Required non-empty string' });
+            }
+          }
+
+          // Validate fallbacks reference existing provider IDs
+          const fallbacks = llm['fallbacks'];
+          if (fallbacks !== undefined) {
+            if (!isArray(fallbacks)) {
+              errors.push({ path: 'llm.fallbacks', message: 'Expected array' });
+            } else {
+              const validIds = new Set(['pi-mono', ...seenIds]);
+              for (let i = 0; i < fallbacks.length; i++) {
+                if (!isString(fallbacks[i])) {
+                  errors.push({ path: `llm.fallbacks[${i}]`, message: 'Expected string' });
+                } else if (!validIds.has(fallbacks[i] as string)) {
+                  errors.push({ path: `llm.fallbacks[${i}]`, message: `Unknown provider ID: "${fallbacks[i]}"` });
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -183,15 +230,63 @@ function validateLegacyConfig(parsed: Record<string, unknown>): ConfigValidation
     errors.push({ path: 'bindings', message: 'Expected array' });
   }
 
-  // Models + auth validation
+  // Models + auth validation (with referential integrity)
   const models = root['models'];
-  if (isRecord(models)) {
-    if (!isArray(models['providers'])) errors.push({ path: 'models.providers', message: 'Expected array' });
-    if (!isArray(models['fallbacks'])) errors.push({ path: 'models.fallbacks', message: 'Expected array' });
-  }
   const auth = root['auth'];
+
+  // Collect auth profile IDs for cross-referencing
+  const authProfileIds = new Set<string>();
   if (isRecord(auth)) {
-    if (!isArray(auth['profiles'])) errors.push({ path: 'auth.profiles', message: 'Expected array' });
+    if (!isArray(auth['profiles'])) {
+      errors.push({ path: 'auth.profiles', message: 'Expected array' });
+    } else {
+      for (const profile of auth['profiles']) {
+        if (isRecord(profile) && isString(profile['id'])) {
+          authProfileIds.add(profile['id'] as string);
+        }
+      }
+    }
+  }
+
+  if (isRecord(models)) {
+    if (!isArray(models['providers'])) {
+      errors.push({ path: 'models.providers', message: 'Expected array' });
+    } else {
+      // Collect provider IDs and validate profile references
+      const providerIds = new Set<string>();
+      for (let i = 0; i < models['providers'].length; i++) {
+        const mp = models['providers'][i];
+        if (isRecord(mp)) {
+          if (isString(mp['id'])) providerIds.add(mp['id'] as string);
+          // Check that referenced profiles exist in auth.profiles
+          if (isArray(mp['profiles'])) {
+            for (const profileRef of mp['profiles'] as unknown[]) {
+              if (isString(profileRef) && authProfileIds.size > 0 && !authProfileIds.has(profileRef)) {
+                errors.push({
+                  path: `models.providers[${i}].profiles`,
+                  message: `Referenced auth profile "${profileRef}" not found in auth.profiles`,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Validate fallback references
+      if (!isArray(models['fallbacks'])) {
+        errors.push({ path: 'models.fallbacks', message: 'Expected array' });
+      } else {
+        for (let i = 0; i < models['fallbacks'].length; i++) {
+          const fid = models['fallbacks'][i];
+          if (isString(fid) && providerIds.size > 0 && !providerIds.has(fid as string)) {
+            errors.push({
+              path: `models.fallbacks[${i}]`,
+              message: `Referenced provider ID "${fid}" not found in models.providers`,
+            });
+          }
+        }
+      }
+    }
   }
 
   // Session validation

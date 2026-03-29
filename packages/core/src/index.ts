@@ -105,7 +105,7 @@ export type {
 } from './orchestration.js';
 
 // User-facing config
-export type { UserConfig, LlmConfig } from './user-config.js';
+export type { UserConfig, LlmConfig, LlmProviderEntry } from './user-config.js';
 
 // Config defaults
 export { CONFIG_DEFAULTS, PROVIDER_API_KEY_MAP } from './config-defaults.js';

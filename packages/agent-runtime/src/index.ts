@@ -8,6 +8,7 @@ export type {
   SessionLine,
   LLMServiceOptions,
   ActiveBinding,
+  ModelOverride,
   FileSystem,
   AgentManagerOptions,
   AgentState,

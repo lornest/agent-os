@@ -17,27 +17,56 @@ export function resolveConfig(userConfig: UserConfig): ClothosConfig {
     const { provider = 'anthropic', model = 'claude-sonnet-4-6', apiKeyEnv } = userConfig.llm;
     const resolvedApiKeyEnv = apiKeyEnv ?? PROVIDER_API_KEY_MAP[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`;
 
-    config.models = {
-      providers: [
-        {
-          id: 'pi-mono',
-          type: 'pi-mono',
-          models: [model],
-          profiles: ['default'],
-        },
-      ],
-      fallbacks: [],
-    };
+    // Primary provider
+    const modelProviders = [
+      {
+        id: 'pi-mono',
+        type: 'pi-mono',
+        models: [model],
+        profiles: ['default'],
+      },
+    ];
 
-    config.auth = {
-      profiles: [
-        {
-          id: 'default',
-          provider,
-          apiKeyEnv: resolvedApiKeyEnv,
-        },
-      ],
-    };
+    const authProfiles = [
+      {
+        id: 'default',
+        provider,
+        apiKeyEnv: resolvedApiKeyEnv,
+        authMode: userConfig.llm.authMode,
+      },
+    ];
+
+    // Additional providers for multi-provider / fallback setups
+    const additionalProviderIds: string[] = [];
+    if (userConfig.llm.providers) {
+      for (const entry of userConfig.llm.providers) {
+        const entryApiKeyEnv = entry.apiKeyEnv
+          ?? PROVIDER_API_KEY_MAP[entry.provider]
+          ?? `${entry.provider.toUpperCase().replace(/-/g, '_')}_API_KEY`;
+
+        modelProviders.push({
+          id: entry.id,
+          type: 'pi-mono',
+          models: [entry.model],
+          profiles: [entry.id],
+        });
+
+        authProfiles.push({
+          id: entry.id,
+          provider: entry.provider,
+          apiKeyEnv: entryApiKeyEnv,
+          authMode: entry.authMode,
+        });
+
+        additionalProviderIds.push(entry.id);
+      }
+    }
+
+    // Fallback order: explicit if provided, else all additional providers in declaration order
+    const fallbacks = userConfig.llm.fallbacks ?? additionalProviderIds;
+
+    config.models = { providers: modelProviders, fallbacks };
+    config.auth = { profiles: authProfiles };
   }
 
   // Apply agents (flat array → { defaults, list })

@@ -5,7 +5,7 @@ import type {
   StreamChunk,
   ToolDefinition,
 } from '@clothos/core';
-import { stream } from '@mariozechner/pi-ai';
+import { stream, getModel } from '@mariozechner/pi-ai';
 import type {
   Api,
   AssistantMessage as PiAssistantMessage,
@@ -38,14 +38,34 @@ export class PiMonoProvider implements LLMProvider {
     this.id = options.id ?? 'pi-mono';
   }
 
+  /**
+   * Resolve the effective model for a completion request.
+   * If options.model is set and differs from the default, attempt to
+   * look up the new model via pi-ai's getModel(). Falls back to
+   * the default model if the override ID is unknown.
+   */
+  private resolveModel(options: CompletionOptions): Model<Api> {
+    if (!options.model || options.model === this.model.id) {
+      return this.model;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider/model IDs are dynamic strings at runtime
+      return getModel(this.model.provider as any, options.model as any);
+    } catch {
+      // Unknown model ID — fall back to the default
+      return this.model;
+    }
+  }
+
   async *streamCompletion(
     messages: AosMessage[],
     tools: ToolDefinition[],
     options: CompletionOptions,
   ): AsyncIterable<StreamChunk> {
-    const context = this.buildContext(messages, tools);
+    const effectiveModel = this.resolveModel(options);
+    const context = this.buildContext(messages, tools, effectiveModel);
 
-    const eventStream = stream(this.model, context, {
+    const eventStream = stream(effectiveModel, context, {
       temperature: options.temperature,
       maxTokens: options.maxTokens,
     });
@@ -99,7 +119,7 @@ export class PiMonoProvider implements LLMProvider {
   }
 
   /** Convert agent-os messages + tools into a pi-ai Context. */
-  private buildContext(messages: AosMessage[], tools: ToolDefinition[]): PiContext {
+  private buildContext(messages: AosMessage[], tools: ToolDefinition[], effectiveModel: Model<Api>): PiContext {
     let systemPrompt: string | undefined;
     const piMessages: (PiUserMessage | PiAssistantMessage | PiToolResultMessage)[] = [];
 
@@ -113,7 +133,7 @@ export class PiMonoProvider implements LLMProvider {
           timestamp: Date.now(),
         });
       } else if (msg.role === 'assistant') {
-        piMessages.push(this.convertAssistantMessage(msg));
+        piMessages.push(this.convertAssistantMessage(msg, effectiveModel));
       } else if (msg.role === 'tool') {
         piMessages.push(this.convertToolResultMessage(msg, piMessages));
       }
@@ -132,7 +152,7 @@ export class PiMonoProvider implements LLMProvider {
   }
 
   /** Convert an agent-os assistant message to a pi-ai AssistantMessage. */
-  private convertAssistantMessage(msg: AosMessage): PiAssistantMessage {
+  private convertAssistantMessage(msg: AosMessage, effectiveModel: Model<Api>): PiAssistantMessage {
     const content: (
       | { type: 'text'; text: string }
       | PiToolCall
@@ -156,9 +176,9 @@ export class PiMonoProvider implements LLMProvider {
     return {
       role: 'assistant',
       content,
-      api: this.model.api,
-      provider: this.model.provider,
-      model: this.model.id,
+      api: effectiveModel.api,
+      provider: effectiveModel.provider,
+      model: effectiveModel.id,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       stopReason: 'stop',
       timestamp: Date.now(),

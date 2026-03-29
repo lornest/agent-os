@@ -26,4 +26,14 @@
   //   provider: "openrouter",
   //   model: "anthropic/claude-sonnet-4.6",
   // },
+
+  // Multi-provider with fallback:
+  // llm: {
+  //   provider: "anthropic",
+  //   model: "claude-sonnet-4-6",
+  //   providers: [
+  //     { id: "openai-fallback", provider: "openai", model: "gpt-4o" },
+  //   ],
+  //   fallbacks: ["openai-fallback"],
+  // },
 }

@@ -13,6 +13,20 @@ import type { OrchestratorConfig } from './orchestration.js';
 import type { SkillsConfig } from './skills.js';
 import type { DeepPartial } from './utils.js';
 
+/** An additional LLM provider entry for multi-provider / fallback setups. */
+export interface LlmProviderEntry {
+  /** Unique ID for this provider entry (e.g. 'openai-fallback'). */
+  id: string;
+  /** pi-ai provider name (e.g. 'openai', 'anthropic', 'openrouter'). */
+  provider: string;
+  /** pi-ai model ID (e.g. 'gpt-4o', 'claude-sonnet-4-6'). */
+  model: string;
+  /** Env var name for the API key. Auto-inferred from provider if omitted. */
+  apiKeyEnv?: string;
+  /** Auth mode: 'apikey' (default) or 'oauth'. */
+  authMode?: 'apikey' | 'oauth';
+}
+
 /** Simplified LLM configuration (replaces models + auth sections). */
 export interface LlmConfig {
   /** pi-ai provider name (e.g. 'anthropic', 'openrouter', 'openai-responses'). */
@@ -23,6 +37,10 @@ export interface LlmConfig {
   apiKeyEnv?: string;
   /** Auth mode: 'apikey' (default) or 'oauth' (Codex subscription, etc.). */
   authMode?: 'apikey' | 'oauth';
+  /** Additional LLM providers for fallback or multi-model setups. */
+  providers?: LlmProviderEntry[];
+  /** Fallback order (provider IDs). Defaults to all additional providers in declaration order. */
+  fallbacks?: string[];
 }
 
 /**

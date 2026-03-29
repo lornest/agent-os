@@ -152,7 +152,7 @@ export class AgentManager {
         sessionId = await this.sessionStore.createSession(this.agentId);
       }
       this.currentSessionId = sessionId;
-      llm.bindSession(sessionId);
+      llm.bindSessionSync(sessionId);
 
       // Build or restore context
       if (!this.context) {
@@ -166,7 +166,7 @@ export class AgentManager {
           // Session JSONL is corrupt or missing — create a fresh session
           sessionId = await this.sessionStore.createSession(this.agentId);
           this.currentSessionId = sessionId;
-          llm.bindSession(sessionId);
+          llm.bindSessionSync(sessionId);
         }
         this.context = new ConversationContext({
           agentId: this.agentId,

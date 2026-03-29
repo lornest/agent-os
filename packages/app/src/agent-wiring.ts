@@ -457,12 +457,17 @@ export async function wireAgent(options: AgentWiringOptions): Promise<WiredAgent
             );
             manager.setTools(narrowedTools, narrowedHandlerMap);
           }
+          // Apply model override for this dispatch
+          if (overrides.model) {
+            llmService.setModelOverride({ model: overrides.model });
+          }
         } catch { /* ignore malformed overrides */ }
       }
     },
-    // onAfterDispatch: restore default tools
+    // onAfterDispatch: restore default tools and clear model override
     () => {
       manager.setTools(defaultTools, defaultHandlerMap);
+      llmService.clearModelOverride();
     },
   );
 

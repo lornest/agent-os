@@ -47,7 +47,7 @@ function createSequenceLLM(calls: CallSpec[]): LLMService {
     models: { providers: [], fallbacks: [] },
     auth: { profiles: [] },
   });
-  service.bindSession('test');
+  service.bindSessionSync('test');
   return service;
 }
 
@@ -308,7 +308,7 @@ describe('agentLoop', () => {
       models: { providers: [], fallbacks: [] },
       auth: { profiles: [] },
     });
-    llm.bindSession('test');
+    llm.bindSessionSync('test');
 
     const ctx = new ConversationContext({
       agentId: 'a1',

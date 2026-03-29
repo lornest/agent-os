@@ -68,6 +68,11 @@ export interface ActiveBinding {
   sessionId?: string;
 }
 
+/** Temporary model override applied for the duration of a single dispatch. */
+export interface ModelOverride {
+  model: string;
+}
+
 /** Injectable filesystem abstraction for testability. */
 export interface FileSystem {
   readFile(path: string): Promise<string>;
